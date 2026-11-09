@@ -6,11 +6,12 @@
 # lands, and every touch it received. Only lines logged after each launch's
 # own marker count, so nothing an earlier launch wrote can pass a check.
 #
-# Three installs and a --configure, 23 checks:
+# Three installs and a --configure, 26 checks:
 #
 #   default     shipped idiom, the binary's own SDK kept, sandboxed, the
 #               embedded framework loads, dlsym(RTLD_DEFAULT, "gl...") answers
-#               OpenGL ES, and a keychain item survives a relaunch (the shim)
+#               OpenGL ES, a keychain item survives a relaunch (the shim), and
+#               an app group's folder is inside the container and writable
 #   mac idiom   --mac-idiom runs the app in the Mac idiom, and a --dylib
 #               source (test/extra.c) is built, linked and loads
 #   playtools   --resolution 1080p forces a 1920x1080 screen, the device model
@@ -122,11 +123,14 @@ install_probe --reset
 check "the binary keeps its own SDK ($SDK)" stamped_sdk "$SDK"
 check "sandboxed" has_entitlement app-sandbox
 check "OpenGL ES redirect linked (the probe links OpenGL ES)" reported 'opengl es:'
+check "app-group shim linked" links 'libipagroups.dylib'
 if launch; then
   check "shipped idiom (iPad, 1)" logged ' launch idiom=1 '
   check "embedded framework loaded" logged 'probekit ok'
   check "GL lookup answers OpenGL ES, not desktop libGL" logged 'gl lookup=OpenGLES '
   check "keychain item stored (shim)" logged 'keychain miss=.* add=0 '
+  check "app-group folder is in the container and writable" \
+    logged 'group write=1 path=.*/Library/Containers/[^/]+/Data/Library/Group Containers/group\.ipa\.probe\.shared '
 else
   bad "the probe did not launch"
 fi
@@ -160,6 +164,7 @@ if launch; then
   check "screen forced to 1920x1080" logged 'screen=1920x1080 '
   check "device model spoofed" logged 'hw.machine=iPad13,8'
   check "keychain item stored (PlayChain)" logged 'keychain miss=.* add=0 '
+  check "app-group folder writable alongside PlayTools" logged 'group write=1 '
   pid=$(pgrep -f "$APP/Probe" | head -1)
   frontmost=0
   for _ in 1 2 3; do

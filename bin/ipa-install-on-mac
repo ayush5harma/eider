@@ -12,7 +12,7 @@
 #   4. convert every Mach-O: arm64, Mac Catalyst, the system Swift overlay
 #   5. rendering: the shipped idiom, or the Mac idiom on request
 #   6. link in what the app needs -- PlayTools (--playtools), the keychain
-#      shim, the OpenGL ES redirect, --dylib libraries
+#      shim, the OpenGL ES redirect, the app-group shim, --dylib libraries
 #   7. sign every Mach-O, then every nested bundle, then the app itself
 #   8. write PlayTools' settings, then move the bundle into place
 #
@@ -603,6 +603,25 @@ if grep -F '/OpenGLES.framework/' "$WORK/linked" >/dev/null; then
   GLES_NOTE="links OpenGL ES: run-time GL lookups answered by OpenGL ES, not desktop GL (libipagles)"
 fi
 
+# ── App groups: each group's folder inside the app's own container ─────────
+# An ad-hoc signature cannot hold an app group macOS honours (a "group." id
+# needs a provisioning profile, and no profile can name another team's group),
+# so System Policy denies every write under ~/Library/Group Containers/<group>
+# and a sandbox exception in the entitlements does not lift it. Measured
+# 2026-11-10 with WhatsApp (Watusi build): CoreData could not open its store
+# there and the app aborted at launch. lib/ipa-groups.m answers
+# containerURLForSecurityApplicationGroupIdentifier: with a folder inside the
+# app's container instead. Every app gets it: one that never asks for a group
+# never reaches it, and a tweak may build its group id at run time, so the
+# binary's strings cannot say which apps need it.
+need_lib ipa-groups.m
+need_sdk "install Xcode"
+GROUPS_LIB="$APP/Frameworks/libipagroups.dylib"
+mkdir -p "$APP/Frameworks"
+catalyst_dylib "$GROUPS_LIB" @executable_path/Frameworks/libipagroups.dylib \
+  "$LIB_DIR/ipa-groups.m" "could not build the app-group shim" -O2 -fobjc-arc -framework Foundation
+link_into_app "$GROUPS_LIB" @executable_path/Frameworks/libipagroups.dylib "the app-group shim"
+
 # ── Extra libraries (--dylib) ─────────────────────────────────────────────
 # App-specific code linked into the main executable the same way as the
 # shims: a source is built for Mac Catalyst against the macOS SDK (it may use
@@ -803,6 +822,7 @@ fi
 echo "  rendering: $RENDER"
 echo "  keychain:  $KEYCHAIN_NOTE"
 [ -z "$GLES_NOTE" ] || echo "  opengl es: $GLES_NOTE"
+echo "  app groups: folders in the container under Library/Group Containers (libipagroups)"
 [ -z "$DYLIB_NOTE" ] || echo "  linked:    $DYLIB_NOTE (--dylib)"
 [ -z "$NEUTRALISED" ] || echo "  neutralised keychain-fix tweak(s):$NEUTRALISED"
 if [ "$PLAYTOOLS" -eq 1 ]; then
