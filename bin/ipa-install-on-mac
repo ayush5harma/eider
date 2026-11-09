@@ -273,12 +273,11 @@ done
 LIPO=$(xcrun -f lipo); OTOOL=$(xcrun -f otool); VTOOL=$(xcrun -f vtool)
 INSTALL_NAME_TOOL=$(xcrun -f install_name_tool)
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-if [ "$USE_SHIM" -eq 1 ] || [ "$USE_PLAYCHAIN" -eq 1 ] || [ "$PLAYTOOLS" -eq 1 ]; then
-  need_sdk "install Xcode or pass --no-keychain"     # before any work, not after
-fi
-[ "$USE_SHIM" -eq 0 ] || need_lib ipa-keychain.c ipa-inject-dylib.py
-[ ${#DYLIBS[@]} -eq 0 ] || need_lib ipa-inject-dylib.py
-[ "$PLAYTOOLS" -eq 0 ] || need_lib ipa-inject-dylib.py playtools-build.sh playtools/Package.resolved
+# Every install builds the app-group shim, so every install needs the SDK.
+need_sdk "install Xcode or the Command Line Tools (xcode-select --install)"   # before any work, not after
+need_lib ipa-groups.m ipa-inject-dylib.py
+[ "$USE_SHIM" -eq 0 ] || need_lib ipa-keychain.c
+[ "$PLAYTOOLS" -eq 0 ] || need_lib playtools-build.sh playtools/Package.resolved
 
 # ── Unpack ──────────────────────────────────────────────────────────────────
 # The work dir is under TMPDIR, the same APFS volume as /Applications, so the
@@ -613,9 +612,8 @@ fi
 # containerURLForSecurityApplicationGroupIdentifier: with a folder inside the
 # app's container instead. Every app gets it: one that never asks for a group
 # never reaches it, and a tweak may build its group id at run time, so the
-# binary's strings cannot say which apps need it.
-need_lib ipa-groups.m
-need_sdk "install Xcode"
+# binary's strings cannot say which apps need it. Only the main executable
+# links it; an app extension that runs on its own still sees the real path.
 GROUPS_LIB="$APP/Frameworks/libipagroups.dylib"
 mkdir -p "$APP/Frameworks"
 catalyst_dylib "$GROUPS_LIB" @executable_path/Frameworks/libipagroups.dylib \

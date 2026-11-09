@@ -164,7 +164,8 @@ if launch; then
   check "screen forced to 1920x1080" logged 'screen=1920x1080 '
   check "device model spoofed" logged 'hw.machine=iPad13,8'
   check "keychain item stored (PlayChain)" logged 'keychain miss=.* add=0 '
-  check "app-group folder writable alongside PlayTools" logged 'group write=1 '
+  check "app-group folder writable alongside PlayTools" \
+    logged 'group write=1 path=.*/Library/Containers/[^/]+/Data/Library/Group Containers/group\.ipa\.probe\.shared '
   pid=$(pgrep -f "$APP/Probe" | head -1)
   frontmost=0
   for _ in 1 2 3; do

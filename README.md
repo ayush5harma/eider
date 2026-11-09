@@ -393,13 +393,17 @@ Measured 2026-11-10 on macOS 27.3 with a Watusi build of WhatsApp: CoreData
 could not create its store in the group folder (error 513) and the app
 aborted at launch in `WAHandleFailureInFunction`.
 
-`lib/ipa-groups.m` is linked into every app and answers that call with
-`Library/Group Containers/<group>` inside the app's own sandbox container
-(`~/Library/Containers/<bundle id>/Data`), creating it on first use. Each app
-keeps a private copy of each group's data, which is all an app without its
-extensions needs. Tweaks that build their own group id at run time (Watusi
-uses `group.com.fouadraheb.watusi.shared`) are covered too, because the
-redirect does not depend on a list of ids.
+`lib/ipa-groups.m` is linked into every app's main executable and answers
+that call with `Library/Group Containers/<group>` inside the app's own
+sandbox container (`~/Library/Containers/<bundle id>/Data`), creating it on
+first use. It calls the original first and moves only its answer, so a tweak
+that hooks the same call still decides which group a call resolves to; Watusi
+builds `group.com.fouadraheb.watusi.shared` at run time and lands beside
+WhatsApp's own groups. Each app keeps a private copy of each group's data.
+Two limits: an app extension that runs on its own does not get the redirect
+(only the main executable links it), and a library that asks for its group
+folder in its own initializer, before this one has loaded (injected libraries
+load last), gets the real path.
 
 ### OpenGL ES lookups would land in desktop OpenGL
 
