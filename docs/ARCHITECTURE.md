@@ -36,10 +36,18 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   CI) and found at run time through `EIDER_SHIMS_DIR`, else beside the
   executable (`../share/eider/shims`), else in the app bundle
   (`Contents/Resources/shims`).
-- Nothing from an IPA or a source is trusted: https only (http for loopback,
-  plus file URLs), archive entries may not escape the extraction directory,
-  sizes are capped, encrypted binaries are refused, and no code from the IPA
-  runs during install.
+- Nothing from an IPA or a source is trusted: https only (http for loopback
+  only for a source added by a loopback address and its items, never from a
+  remote source, a redirect from https or an `eider://` link; plus file URLs
+  for a local source), archive entries may not escape the extraction
+  directory (symlinks are never extracted by unzip: they are recreated after,
+  relative and without `..`), sizes are capped on bytes written, encrypted
+  binaries are refused, and no code from the IPA runs during install.
+- A bundle id is validated by `BundleIdentifier.isValid` wherever it arrives
+  or becomes a path. Names and versions pass through `DisplayText` at the
+  model boundary. A bundle at the install destination is replaced only if the
+  library recorded it or `force` is set, and the old copy goes to the Trash,
+  never deleted.
 - Errors carry a stable code and a sentence a person can act on. Progress is
   a stream of typed events; the CLI prints them or emits JSON lines, the app
   draws them.
