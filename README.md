@@ -65,6 +65,12 @@ the window installs it. An `eider://source/<url>` or `eider://install/<url>`
 link always asks before it does anything. The app and the CLI share one
 engine, `EiderKit`, so they behave the same.
 
+The Library and Browse sections, drawn by the app's own `--snapshot` mode against a test source:
+
+![Library: an installed app with an update available](docs/images/library.png)
+
+![Browse: a source's apps and the detail pane](docs/images/browse.png)
+
 ## How an install works
 
 1. Unpack the archive, refusing unsafe entries, and find the one `Payload/*.app`.
