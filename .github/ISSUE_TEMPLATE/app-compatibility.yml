@@ -1,0 +1,64 @@
+name: App compatibility report
+description: An app installed with Eider does not launch or misbehaves.
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not name or link sources of decrypted App Store apps. Reports that do
+        will be closed. Eider does not decrypt anything.
+  - type: input
+    id: app
+    attributes:
+      label: App name and version
+      description: Use a bundle identifier if the app is your own or open source.
+    validations:
+      required: true
+  - type: dropdown
+    id: app-class
+    attributes:
+      label: App class
+      options:
+        - Native UIKit or SwiftUI
+        - Game (Metal)
+        - Game (Unity or Unreal)
+        - React Native or Flutter
+        - Uses push notifications, widgets or extensions
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: eider-version
+    attributes:
+      label: Eider version
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version and Mac model
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Install failed
+        - Installed, does not launch
+        - Launches, then quits
+        - Launches, a feature is broken
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: Paste the diagnostics Eider prints for the installed app (the app's Diagnose action, or the CLI diagnose command).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

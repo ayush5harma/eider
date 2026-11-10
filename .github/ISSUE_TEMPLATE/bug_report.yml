@@ -1,0 +1,36 @@
+name: Bug report
+description: Something in Eider does not work as described.
+labels: [bug]
+body:
+  - type: input
+    id: eider-version
+    attributes:
+      label: Eider version
+      description: Output of `eider --version`, or the version shown in the app.
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 15.1, MacBook Air M2
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Command output or error text
+      description: Paste the full output, including any error code. Remove anything private.
+      render: shell
+  - type: textarea
+    id: source
+    attributes:
+      label: Source involved, if any
+      description: The source URL or a minimal JSON that reproduces the problem.
