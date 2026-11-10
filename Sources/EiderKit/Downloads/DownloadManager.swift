@@ -55,7 +55,9 @@ public actor DownloadManager {
         emit: @escaping @Sendable (DownloadEvent) -> Void
     ) async throws {
         let url = version.downloadURL
-        guard URLPolicy.isAllowed(url) else { throw DownloadFailure.blockedURL(url.absoluteString) }
+        // Loopback is allowed here because the callers vet it: AppOperations refuses a
+        // loopback address that does not come from a loopback source.
+        guard URLPolicy.isAllowed(url, allowLoopback: true) else { throw DownloadFailure.blockedURL(url.absoluteString) }
         try paths.ensure()
         let file = destination(app, version)
         guard inFlight.insert(file).inserted else { throw DownloadFailure.alreadyInProgress(file.lastPathComponent) }

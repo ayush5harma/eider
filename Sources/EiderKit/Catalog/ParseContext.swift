@@ -14,6 +14,9 @@ struct ParseContext {
     /// A local source may point at local files; a remote one never may.
     var allowFile: Bool { sourceURL.isFileURL }
 
+    /// Only a source the user added by a loopback address may point at loopback.
+    var allowLoopback: Bool { URLPolicy.isLoopbackURL(sourceURL) }
+
     mutating func warn(_ line: String) {
         warnings.append(line)
     }
@@ -21,7 +24,7 @@ struct ParseContext {
     /// Cosmetic URLs (icons, screenshots, links) are dropped without a warning.
     func url(_ raw: String?) -> URL? {
         guard let raw else { return nil }
-        return URLPolicy.resolve(raw, against: sourceURL, allowFile: allowFile)
+        return URLPolicy.resolve(raw, against: sourceURL, allowFile: allowFile, allowLoopback: allowLoopback)
     }
 
     /// A download URL that is present but refused deserves a line, because it

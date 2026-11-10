@@ -58,7 +58,9 @@ public struct AppOperations: Sendable {
         ipaURL: URL, options: InstallOptions = InstallOptions(),
         onEvent: @escaping @Sendable (OperationEvent) -> Void = { _ in }
     ) async throws -> InstalledApp {
-        guard URLPolicy.isAllowed(ipaURL) else { throw OperationFailure.badURL(ipaURL) }
+        // An address the caller typed (the CLI, a file drop): loopback is theirs to ask for. A deep link
+        // never gets here with one, DeepLink.parse refuses it.
+        guard URLPolicy.isAllowed(ipaURL, allowLoopback: true) else { throw OperationFailure.badURL(ipaURL) }
         let name = ipaURL.lastPathComponent.isEmpty ? ipaURL.host ?? "app" : ipaURL.lastPathComponent
         let key = SHA256.hash(data: Data(ipaURL.absoluteString.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
         // The downloads folder names files by bundle id and version; the real id
@@ -148,6 +150,10 @@ public struct AppOperations: Sendable {
     ) async throws -> InstalledApp {
         do {
             let release = try Self.pick(version, of: app)
+            // Source entries are vetted when parsed; this also covers a copy saved before that rule.
+            guard URLPolicy.isAllowed(release.downloadURL, allowLoopback: URLPolicy.isLoopbackURL(sourceURL)) else {
+                throw OperationFailure.badURL(release.downloadURL)
+            }
             var options = options
             options.sourceURL = sourceURL
             var mapper = DownloadEventMapper(label: "\(app.name) \(release.version)")

@@ -201,8 +201,7 @@ final class CatalogDeepLinkTests: XCTestCase {
         XCTAssertNil(parse("eider://source/http://example.com/repo.json"))
         XCTAssertNil(parse("eider://install/file:///tmp/a.ipa"), "a link must never reach a local file")
         XCTAssertNil(parse("eider://install/javascript:alert(1)"))
-        XCTAssertEqual(parse("eider://source/http://localhost:8000/repo.json"),
-                       .addSource(URL(string: "http://localhost:8000/repo.json")!))
+        XCTAssertNil(parse("eider://source/http://localhost:8000/repo.json"), "a link never reaches loopback")
     }
 
     func testOtherLinksAreIgnored() {

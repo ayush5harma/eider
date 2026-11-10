@@ -76,14 +76,20 @@ you can; it is the only integrity check a source can offer.
 ## URL rules
 
 - `https` only. `http` is accepted only for loopback hosts (`localhost`,
-  `127.0.0.0/8`, `::1`), for local testing.
+  `127.0.0.0/8`, `::1`, checked as real addresses, so `127.evil.example.com`
+  is not one), and only for a source you added by a loopback address and the
+  items inside it, for local testing. An `https` source cannot point at a
+  loopback address, a redirect from `https` to loopback is refused, and a
+  deep link never carries one.
 - A relative URL (for example `"downloadURL": "ipas/Example.ipa"`) resolves
   against the URL the source was fetched from.
 - `file` URLs work only when the source itself was opened from a local file.
 - Redirects are held to the same rules.
 
 An entry whose download URL breaks these rules is skipped with a warning; the
-rest of the source still loads.
+rest of the source still loads. An entry whose bundle id is not a plain
+reverse-DNS name (dot-separated letters, digits, `-` and `_`) is skipped the
+same way.
 
 ## What makes an IPA installable
 
@@ -103,6 +109,6 @@ investigate.
 - `eider://source/<url>` adds the source at `<url>`.
 - `eider://install/<url>` starts an install of the IPA at `<url>`.
 
-`<url>` follows the URL rules above, except that `file` URLs are never
-accepted from a link. Percent-encode it if it carries a query string you want
+`<url>` follows the URL rules above, except that `file` URLs and loopback
+addresses are never accepted from a link. Percent-encode it if it carries a query string you want
 kept.

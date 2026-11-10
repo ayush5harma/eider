@@ -79,7 +79,7 @@ public actor SourceStore {
     // MARK: Internals
 
     private static func load(_ url: URL, using fetch: SourceFetch) async throws -> CatalogSource {
-        guard URLPolicy.isAllowed(url, allowFile: true) else {
+        guard URLPolicy.isAllowed(url, allowFile: true, allowLoopback: true) else {
             throw CatalogFailure.blockedURL(url.absoluteString)
         }
         return try SourceParser.parse(data: try await fetch(url), from: url)

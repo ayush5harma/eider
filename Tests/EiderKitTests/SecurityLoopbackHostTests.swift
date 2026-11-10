@@ -6,7 +6,7 @@ import XCTest
 /// looked at a prefix and a dot count.
 final class SecurityLoopbackHostTests: XCTestCase {
     private func allowed(_ text: String) -> Bool {
-        URL(string: text).map { URLPolicy.isAllowed($0) } ?? false
+        URL(string: text).map { URLPolicy.isAllowed($0, allowLoopback: true) } ?? false
     }
 
     func testOnlyRealLoopbackAddressesAreAccepted() {
