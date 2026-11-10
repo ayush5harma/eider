@@ -31,6 +31,8 @@ public struct InstallFailure: Error, Sendable, Equatable, LocalizedError, Custom
         case destinationUnusable, destinationConflict, placementFailed
         /// The IPA is not the app the catalog entry named.
         case bundleIDMismatch
+        /// The previous copy could not be moved to the Trash, so it was left alone.
+        case trashUnavailable
         case unsupportedOption, invalidOption
         /// A reset was asked for while the app is running.
         case appRunning

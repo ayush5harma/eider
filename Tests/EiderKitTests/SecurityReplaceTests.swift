@@ -129,17 +129,25 @@ final class SecurityReplaceTests: XCTestCase {
     }
 }
 
-/// A stand-in for the Trash that records what was sent there and really removes it,
-/// so the placement that follows finds a free name.
+/// A stand-in for the Trash: what is sent there is recorded and moved into `bin`
+/// (or removed, when there is none), so the placement that follows finds a free name.
 final class TrashLog: @unchecked Sendable {
     private let lock = NSLock()
     private var _urls: [URL] = []
+    private let bin: URL?
+    init(bin: URL? = nil) { self.bin = bin }
     var urls: [URL] { lock.withLock { _urls } }
 
     @discardableResult
     func add(_ url: URL) -> URL? {
         lock.withLock { _urls.append(url) }
-        try? FileManager.default.removeItem(at: url)
-        return nil
+        guard let bin else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        let moved = bin.appendingPathComponent(UUID().uuidString).appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.createDirectory(at: moved.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.moveItem(at: url, to: moved)
+        return moved
     }
 }

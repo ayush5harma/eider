@@ -11,9 +11,14 @@ struct AppPlacer {
     let recorded: [InstalledApp]
     /// Moves a path to the Trash and says where it went.
     var trash: (URL) throws -> URL? = { try Trash.move($0) }
+    var move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
     let emit: (String, Double) -> Void
 
-    /// Returns where the app now is.
+    /// Nothing destructive happens until the new copy is ready on the destination
+    /// volume: stage it there, move the old copy to the Trash, move the new one into
+    /// place, and put the old one back if that last move fails. The old copy is never
+    /// deleted outright; with no Trash the install stops. Data is reset only once the
+    /// new app is in place. Returns where the app now is.
     func place(_ app: URL, name: String, bundleID: String, into destination: URL) throws -> URL {
         do { try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true) } catch {
             throw InstallFailure(.destinationUnusable, "Cannot create \(destination.path): \(error.localizedDescription)")
@@ -22,11 +27,33 @@ struct AppPlacer {
             throw InstallFailure(.destinationUnusable, "\(destination.path) is not writable. Choose another folder.")
         }
         let target = destination.appendingPathComponent("\(name).app", isDirectory: true)
-        try moveExistingCopyAside(target, bundleID: bundleID)
-        if resetData, let note = reset.clear(bundleID: bundleID) { emit(note, 0.96) }
-        do { try FileManager.default.moveItem(at: app, to: target) } catch {
-            throw InstallFailure(.placementFailed, "Could not move the app into \(destination.path): \(error.localizedDescription)")
+        let replacing = FileManager.default.fileExists(atPath: target.path)
+        if replacing { try requireOwnershipOrForce(of: target, bundleID: bundleID) }
+
+        let staging = destination.appendingPathComponent(".eider-staging-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let staged = staging.appendingPathComponent("\(name).app", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+            try move(app, staged)
+        } catch {
+            throw InstallFailure(.placementFailed, "Could not copy the app into \(destination.path): \(error.localizedDescription)")
         }
+
+        var trashed: URL?
+        if replacing {
+            do { trashed = try trash(target) } catch {
+                throw InstallFailure(
+                    .trashUnavailable,
+                    "The previous copy of \(name) could not be moved to the Trash (\(error.localizedDescription)), so it was left in place and nothing was installed."
+                )
+            }
+            emit("Previous copy moved to the Trash", 0.95)
+        }
+        do { try move(staged, target) } catch {
+            throw InstallFailure(.placementFailed, "Could not move the app into \(destination.path): \(error.localizedDescription)" + restoreOldCopy(trashed, to: target, replacing: replacing))
+        }
+        if resetData, let note = reset.clear(bundleID: bundleID) { emit(note, 0.96) }
         return target
     }
 
@@ -40,22 +67,25 @@ struct AppPlacer {
 
     private static func canonical(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
 
-    private func moveExistingCopyAside(_ target: URL, bundleID: String) throws {
-        guard FileManager.default.fileExists(atPath: target.path) else { return }
-        if !isRecorded(bundleID: bundleID, at: target), !force {
-            let old = ["Info.plist", "Contents/Info.plist"].lazy
-                .compactMap { try? InfoPlist(url: target.appendingPathComponent($0)) }.first?.string("CFBundleIdentifier")
-            throw InstallFailure(
-                .destinationConflict,
-                "\(target.path) already exists and Eider did not install it (bundle id \(old ?? "unknown")). Use force to replace it, or choose another destination."
-            )
+    private func requireOwnershipOrForce(of target: URL, bundleID: String) throws {
+        guard !isRecorded(bundleID: bundleID, at: target), !force else { return }
+        let old = ["Info.plist", "Contents/Info.plist"].lazy
+            .compactMap { try? InfoPlist(url: target.appendingPathComponent($0)) }.first?.string("CFBundleIdentifier")
+        throw InstallFailure(
+            .destinationConflict,
+            "\(target.path) already exists and Eider did not install it (bundle id \(old ?? "unknown")). Use force to replace it, or choose another destination."
+        )
+    }
+
+    /// What to add to the failure when the old copy had been trashed.
+    private func restoreOldCopy(_ trashed: URL?, to target: URL, replacing: Bool) -> String {
+        guard replacing else { return "" }
+        guard let trashed else { return ". The previous copy is in the Trash." }
+        do {
+            try move(trashed, target)
+            return ". The previous copy was put back."
+        } catch {
+            return ". The previous copy is in the Trash at \(trashed.path)."
         }
-        do { _ = try trash(target) } catch {
-            do { try FileManager.default.removeItem(at: target) } catch {
-                throw InstallFailure(.placementFailed, "Cannot replace \(target.path): \(error.localizedDescription)")
-            }
-            emit("Could not use the Trash; the previous copy was deleted.", 0.95)
-        }
-        emit("Previous copy moved to the Trash", 0.95)
     }
 }
