@@ -95,17 +95,19 @@ struct InstallCommand: AsyncParsableCommand {
         )
     }
 
-    /// An existing file wins; then an address (or an `eider://install/` link);
-    /// anything that looks like a path but is not there is a missing file, not a
-    /// bundle id; the rest is a bundle id.
+    /// An address (or an `eider://install/` link) first; then anything that looks
+    /// like a path (it has a slash or ends in `.ipa`), whether or not it exists, so a
+    /// typo is a missing file, not a bundle id; the rest is a bundle id. A file that
+    /// happens to share a bundle id's name in the current directory does not win:
+    /// `eider install com.example.app` once installed whatever file was lying there.
     static func resolve(_ text: String) -> Source {
-        let expanded = (text as NSString).expandingTildeInPath
-        if FileManager.default.fileExists(atPath: expanded) { return .localFile(URL(fileURLWithPath: expanded)) }
         if let url = URL(string: text), let scheme = url.scheme?.lowercased() {
             if scheme == "eider", case .install(let inner)? = DeepLink.parse(url) { return .address(inner) }
             if scheme == "https" || scheme == "http" || scheme == "file" { return .address(url) }
         }
-        if text.contains("/") || text.lowercased().hasSuffix(".ipa") { return .localFile(URL(fileURLWithPath: expanded)) }
+        if text.contains("/") || text.lowercased().hasSuffix(".ipa") {
+            return .localFile(URL(fileURLWithPath: (text as NSString).expandingTildeInPath))
+        }
         return .catalog(text)
     }
 }
