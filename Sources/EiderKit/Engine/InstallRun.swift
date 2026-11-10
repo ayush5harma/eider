@@ -12,6 +12,7 @@ final class InstallRun: @unchecked Sendable {
     private let shims: ShimLocator
     private let extractor: IPAExtractor
     private let reset: DataReset
+    private let recorded: [InstalledApp]
     private let onEvent: @Sendable (InstallEvent) -> Void
 
     private var plist: InfoPlist!
@@ -19,12 +20,13 @@ final class InstallRun: @unchecked Sendable {
     private var converter: BundleConverter!
     private var app: URL!
 
-    init(ipa: URL, options: InstallOptions, shims: ShimLocator, extractor: IPAExtractor, reset: DataReset, onEvent: @escaping @Sendable (InstallEvent) -> Void) {
+    init(ipa: URL, options: InstallOptions, shims: ShimLocator, extractor: IPAExtractor, reset: DataReset, recorded: [InstalledApp] = [], onEvent: @escaping @Sendable (InstallEvent) -> Void) {
         self.ipa = ipa
         self.options = options
         self.shims = shims
         self.extractor = extractor
         self.reset = reset
+        self.recorded = recorded
         self.onEvent = onEvent
     }
 
@@ -76,11 +78,23 @@ final class InstallRun: @unchecked Sendable {
         emit(.validate, "Reading the app's Info.plist", 0.2)
         plist = try InfoPlist(url: app.appendingPathComponent("Info.plist"))
         identity = try BundleIdentity(plist: plist, options: options)
+        try checkExpectedBundleID()
         guard FileManager.default.fileExists(atPath: app.appendingPathComponent(identity.executable).path) else {
             throw InstallFailure(.badBundle, "The executable \(identity.executable) is not in the bundle.")
         }
         if options.resetData { try reset.refuseIfRunning(name: identity.name) }
         emit(.validate, "\(identity.name) (\(identity.bundleID)), executable \(identity.executable), iOS \(identity.minimumOS ?? "?")+", 0.22)
+    }
+
+    /// A catalog entry names the app it offers. An IPA that ships another id is not
+    /// that app, and installing it could replace one the user has; the override is
+    /// the user's explicit word that this IPA's id is the one they want.
+    private func checkExpectedBundleID() throws {
+        guard let expected = options.expectedBundleID, identity.shippedID != expected, identity.shippedID != options.bundleID else { return }
+        throw InstallFailure(
+            .bundleIDMismatch,
+            "The source lists \(expected), but this IPA is \(identity.shippedID). Nothing was installed. If you trust it, install it again with --bundle-id \(identity.shippedID)."
+        )
     }
 
     /// App extensions are a frequent reason a sideloaded app fails to launch or
@@ -184,45 +198,15 @@ final class InstallRun: @unchecked Sendable {
 
     private func place() throws -> InstalledApp {
         emit(.place, "Installing into \(options.destination.path)", 0.94)
-        let destination = options.destination
-        do { try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true) } catch {
-            throw InstallFailure(.destinationUnusable, "Cannot create \(destination.path): \(error.localizedDescription)")
-        }
-        guard FileManager.default.isWritableFile(atPath: destination.path) else {
-            throw InstallFailure(.destinationUnusable, "\(destination.path) is not writable. Choose another folder.")
-        }
-        let target = destination.appendingPathComponent("\(identity.name).app", isDirectory: true)
-        try moveExistingCopyAside(target)
-        if options.resetData, let note = reset.clear(bundleID: identity.bundleID) { emit(.place, note, 0.96) }
-        do { try FileManager.default.moveItem(at: app, to: target) } catch {
-            throw InstallFailure(.placementFailed, "Could not move the app into \(destination.path): \(error.localizedDescription)")
-        }
+        let placer = AppPlacer(
+            force: options.force, resetData: options.resetData, reset: reset, recorded: recorded,
+            emit: { [onEvent] message, fraction in onEvent(InstallEvent(step: .place, message: message, fraction: fraction)) })
+        let target = try placer.place(app, name: identity.name, bundleID: identity.bundleID, into: options.destination)
         _ = try? ProcessRunner.run(Self.lsregister, ["-f", target.path])
         return InstalledApp(
             bundleID: identity.bundleID, name: identity.name,
             version: plist.string("CFBundleShortVersionString") ?? "", build: plist.string("CFBundleVersion") ?? "",
             path: target, sourceURL: options.sourceURL, ipaSHA256: options.ipaSHA256, options: options
         )
-    }
-
-    /// A same-named bundle with another bundle id is somebody else's app: leave
-    /// it unless asked. Either way the old copy goes to the Trash, not the bin.
-    private func moveExistingCopyAside(_ target: URL) throws {
-        guard FileManager.default.fileExists(atPath: target.path) else { return }
-        let old = ["Info.plist", "Contents/Info.plist"].lazy
-            .compactMap { try? InfoPlist(url: target.appendingPathComponent($0)) }.first?.string("CFBundleIdentifier")
-        if old != identity.bundleID, !options.force {
-            throw InstallFailure(
-                .destinationConflict,
-                "\(target.path) already exists with bundle id \(old ?? "unknown"), not \(identity.bundleID). Use force to replace it, or choose another destination."
-            )
-        }
-        do { _ = try Trash.move(target) } catch {
-            do { try FileManager.default.removeItem(at: target) } catch {
-                throw InstallFailure(.placementFailed, "Cannot replace \(target.path): \(error.localizedDescription)")
-            }
-            emit(.warning, "Could not use the Trash; the previous copy was deleted.", 0.95)
-        }
-        emit(.place, "Previous copy moved to the Trash", 0.95)
     }
 }

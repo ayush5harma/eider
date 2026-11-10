@@ -49,7 +49,7 @@ public struct AppOperations: Sendable {
         options: InstallOptions = InstallOptions(),
         onEvent: @escaping @Sendable (OperationEvent) -> Void = { _ in }
     ) async throws -> InstalledApp {
-        try await install(app: app, version: version, sourceURL: source.url, options: options, onEvent: onEvent)
+        try await install(app: app, version: version, sourceURL: source.url, options: options, expectsCatalogID: true, onEvent: onEvent)
     }
 
     /// Installs from a direct https address (the `eider://install/` deep link).
@@ -66,7 +66,7 @@ public struct AppOperations: Sendable {
         // The downloads folder names files by bundle id and version; the real id
         // is only known once the IPA is open, so the address stands in for it.
         let app = CatalogApp(bundleID: "direct-\(key)", name: name, versions: [CatalogVersion(version: "direct", downloadURL: ipaURL)])
-        return try await install(app: app, version: nil, sourceURL: ipaURL, options: options, onEvent: onEvent)
+        return try await install(app: app, version: nil, sourceURL: ipaURL, options: options, expectsCatalogID: false, onEvent: onEvent)
     }
 
     /// Installs a `.ipa` already on this Mac.
@@ -102,7 +102,8 @@ public struct AppOperations: Sendable {
             guard let update = UpdateChecker.update(for: installed, in: catalog) else { return nil }
             var options = installed.options
             options.resetData = false
-            return try await install(app: update.app, version: update.version, sourceURL: update.sourceURL, options: options, onEvent: onEvent)
+            options.force = false
+            return try await install(app: update.app, version: update.version, sourceURL: update.sourceURL, options: options, expectsCatalogID: true, onEvent: onEvent)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -145,7 +146,7 @@ public struct AppOperations: Sendable {
     // MARK: Download then install
 
     private func install(
-        app: CatalogApp, version: CatalogVersion?, sourceURL: URL, options: InstallOptions,
+        app: CatalogApp, version: CatalogVersion?, sourceURL: URL, options: InstallOptions, expectsCatalogID: Bool,
         onEvent: @escaping @Sendable (OperationEvent) -> Void
     ) async throws -> InstalledApp {
         do {
@@ -156,6 +157,8 @@ public struct AppOperations: Sendable {
             }
             var options = options
             options.sourceURL = sourceURL
+            // A direct address has a made-up id; a catalog entry's id is the app the user chose.
+            options.expectedBundleID = expectsCatalogID ? app.bundleID : nil
             var mapper = DownloadEventMapper(label: "\(app.name) \(release.version)")
             var file: URL?
             for try await event in downloads.download(release, of: app) {

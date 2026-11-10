@@ -29,6 +29,8 @@ public struct InstallFailure: Error, Sendable, Equatable, LocalizedError, Custom
         case encrypted, noArm64Slice, noMachO, machOEdit
         case missingShim, signingFailed, verificationFailed
         case destinationUnusable, destinationConflict, placementFailed
+        /// The IPA is not the app the catalog entry named.
+        case bundleIDMismatch
         case unsupportedOption, invalidOption
         /// A reset was asked for while the app is running.
         case appRunning
@@ -64,6 +66,10 @@ public struct InstallOptions: Codable, Sendable, Equatable {
     /// Recorded in the library, nothing more.
     public var sourceURL: URL?
     public var ipaSHA256: String?
+    /// Per invocation, never recorded: when installing a catalog entry, the id the
+    /// source lists. The IPA must ship that id (or the `bundleID` override), so a
+    /// source cannot hand over an IPA that replaces some other app.
+    public var expectedBundleID: String?
 
     public static let defaultDestination = URL(fileURLWithPath: "/Applications", isDirectory: true)
 
@@ -78,7 +84,8 @@ public struct InstallOptions: Codable, Sendable, Equatable {
         resetData: Bool = false,
         force: Bool = false,
         sourceURL: URL? = nil,
-        ipaSHA256: String? = nil
+        ipaSHA256: String? = nil,
+        expectedBundleID: String? = nil
     ) {
         self.destination = destination
         self.macIdiom = macIdiom
@@ -91,5 +98,6 @@ public struct InstallOptions: Codable, Sendable, Equatable {
         self.force = force
         self.sourceURL = sourceURL
         self.ipaSHA256 = ipaSHA256
+        self.expectedBundleID = expectedBundleID
     }
 }

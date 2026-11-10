@@ -197,6 +197,34 @@ final class OperationsTests: XCTestCase {
         XCTAssertTrue(StubURLProtocol.requests.contains { $0.url?.lastPathComponent == "com.x-2.0.ipa" })
     }
 
+    func testUpdateNeverRunsForcedEvenIfTheLibraryFileSaysSo() async throws {
+        fake.set(sourceURL, json: source([("2.0", "1"), ("1.0", "1")]))
+        let ops = operations()
+        _ = try await ops.sources.add(url: sourceURL)
+        try await ops.library.record(installedApp(version: "1.0"))
+        // A library.json from before force stopped being recorded, or edited by hand.
+        let text = try String(contentsOf: paths.libraryFile).replacingOccurrences(of: #""force" : false"#, with: #""force" : true"#)
+        try text.write(to: paths.libraryFile, atomically: true, encoding: .utf8)
+        let stored = try await ops.library.app(bundleID: "com.x")
+        XCTAssertEqual(stored?.options.force, true, "the fixture really carries force")
+
+        _ = try await ops.update(bundleID: "com.x")
+
+        XCTAssertEqual(recorder.installs.first?.options.force, false)
+    }
+
+    func testACatalogInstallExpectsTheCatalogIDAndADirectAddressDoesNot() async throws {
+        fake.set(sourceURL, json: source([("1.0", "1")]))
+        let ops = operations()
+        let added = try await ops.sources.add(url: sourceURL)
+        let app = try XCTUnwrap(added.apps.first)
+        _ = try await ops.install(app: app, from: added)
+        XCTAssertEqual(recorder.installs.last?.options.expectedBundleID, "com.x")
+
+        _ = try await ops.install(ipaURL: URL(string: "https://cdn.example.com/direct.ipa")!)
+        XCTAssertNil(recorder.installs.last?.options.expectedBundleID, "a direct address has a made-up id to compare against")
+    }
+
     func testUpdateWhenCurrentReturnsNilAndInstallsNothing() async throws {
         fake.set(sourceURL, json: source([("1.0", "1")]))
         let ops = operations()

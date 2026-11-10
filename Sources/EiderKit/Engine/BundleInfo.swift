@@ -36,6 +36,8 @@ struct InfoPlist {
 struct BundleIdentity {
     let executable: String
     let bundleID: String
+    /// What the IPA itself declares, before any override.
+    let shippedID: String
     /// The installed bundle is named after this.
     let name: String
     let minimumOS: String?
@@ -74,6 +76,7 @@ struct BundleIdentity {
         guard !name.isEmpty else { throw InstallFailure(.invalidOption, "The display name is empty.") }
         self.executable = executable
         bundleID = options.bundleID ?? shippedID
+        self.shippedID = shippedID
         self.name = name
         minimumOS = plist.string("MinimumOSVersion")
     }
