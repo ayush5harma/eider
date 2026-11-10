@@ -54,9 +54,12 @@ final class DownloadsManagerTests: XCTestCase {
         StubURLProtocol.handler = { request in
             let total = data.count
             let chunks = stride(from: 0, to: total, by: chunk).map { data[$0..<min($0 + chunk, total)] }
+            let whole = Reply(headers: ["ETag": "\"v1\""], chunks: chunks.map { Data($0) })
             guard let range = request.value(forHTTPHeaderField: "Range"),
                   let start = Int(range.dropFirst("bytes=".count).dropLast())
-            else { return .init(chunks: chunks.map { Data($0) }) }
+            else { return whole }
+            // A server honours Range only while If-Range still names its current version.
+            if let condition = request.value(forHTTPHeaderField: "If-Range"), condition != "\"v1\"" { return whole }
             let rest = data[start...]
             return .init(status: 206, headers: ["Content-Range": "bytes \(start)-\(total - 1)/\(total)"],
                          chunks: [Data(rest)])
@@ -67,9 +70,18 @@ final class DownloadsManagerTests: XCTestCase {
         paths.downloads.appendingPathComponent(name)
     }
 
-    private func plantPart(_ prefix: Data, name: String = "com.example.app-1.0.ipa.part") throws {
+    private typealias Reply = StubURLProtocol.Reply
+
+    private func partFile(for address: URL? = nil) -> URL {
+        DownloadManager.partFile(for: destination(), url: address ?? url)
+    }
+
+    /// A leftover from an interrupted run: the bytes, and the validator its first response carried.
+    private func plantPart(_ prefix: Data, validator: String? = "\"v1\"", address: URL? = nil) throws {
         try paths.ensure()
-        try prefix.write(to: paths.downloads.appendingPathComponent(name))
+        let part = partFile(for: address)
+        try prefix.write(to: part)
+        if let validator { try Data(validator.utf8).write(to: part.appendingPathExtension("validator")) }
     }
 
     // MARK: Fresh, resume, restart
@@ -82,7 +94,7 @@ final class DownloadsManagerTests: XCTestCase {
         XCTAssertEqual(events.last, .finished(file: destination(), sha256: sha(body)))
         XCTAssertTrue(events.contains(.progress(received: 3000, expected: 3000)))
         XCTAssertEqual(try Data(contentsOf: destination()), body)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: destination().path + ".part"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partFile().path))
         let request = try XCTUnwrap(StubURLProtocol.requests.first)
         XCTAssertNil(request.value(forHTTPHeaderField: "Range"))
         XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Encoding"), "identity")
@@ -134,6 +146,64 @@ final class DownloadsManagerTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: destination()), body)
     }
 
+    // MARK: Resume is tied to the address and the version it started from
+
+    func testAPartFromAnotherAddressIsNeverResumed() async throws {
+        let other = URL(string: "https://mirror.example.net/app.ipa")!
+        let first = Data(repeating: 0xAA, count: 3000)
+        StubURLProtocol.handler = { _ in .init(headers: ["Content-Length": "3000", "ETag": "\"v1\""], chunks: [first.prefix(1200)]) }
+        await expectFailure(.incomplete(received: 1200, expected: 3000)) { _ = try await run(manager(), app(url: url)) }
+
+        serve(body)
+        _ = try await run(manager(), app(url: other))
+
+        XCTAssertNil(StubURLProtocol.requests.last?.value(forHTTPHeaderField: "Range"), "the leftover belongs to another address")
+        XCTAssertEqual(try Data(contentsOf: destination()), body)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: partFile(for: url).path), "the other address keeps its own leftover")
+    }
+
+    func testAPartWithNoValidatorIsStartedOver() async throws {
+        try plantPart(Data(repeating: 0xEE, count: 1200), validator: nil)
+        serve(body)
+        _ = try await run(manager(), app())
+        XCTAssertEqual(StubURLProtocol.requests.count, 1)
+        XCTAssertNil(StubURLProtocol.requests.first?.value(forHTTPHeaderField: "Range"))
+        XCTAssertEqual(try Data(contentsOf: destination()), body)
+    }
+
+    func testResumeSendsIfRangeAndAServerThatChangedTheFileIsNotSplicedOnto() async throws {
+        try plantPart(Data(repeating: 0xEE, count: 1200), validator: "\"old\"")
+        StubURLProtocol.handler = { [body] request in
+            // The file changed: If-Range no longer matches, so the whole new file comes back as 200.
+            request.value(forHTTPHeaderField: "If-Range") == "\"old\"" ? .init(headers: ["ETag": "\"new\""], chunks: [body]) : .init(status: 500)
+        }
+        _ = try await run(manager(), app())
+
+        let request = try XCTUnwrap(StubURLProtocol.requests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Range"), "bytes=1200-")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "If-Range"), "\"old\"")
+        XCTAssertEqual(try Data(contentsOf: destination()), body, "none of the 0xEE bytes survive")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partFile().appendingPathExtension("validator").path))
+    }
+
+    func testLastModifiedIsTheFallbackValidatorAndAWeakETagIsNotOne() async throws {
+        let date = "Tue, 10 Nov 2026 10:00:00 GMT"
+        for (headers, expected) in [(["Last-Modified": date], date), (["ETag": "W/\"weak\"", "Last-Modified": date], date), (["ETag": "W/\"weak\""], nil)] as [([String: String], String?)] {
+            StubURLProtocol.reset()
+            paths = try CatalogFixtures.temporaryHome()
+            StubURLProtocol.handler = { [body] _ in
+                .init(headers: headers.merging(["Content-Length": "3000"]) { $1 }, chunks: [body.prefix(1000)])
+            }
+            await expectFailure(.incomplete(received: 1000, expected: 3000)) { _ = try await run(manager(), app()) }
+            XCTAssertEqual(PartTransfer.savedValidator(for: partFile()), expected, "\(headers)")
+
+            serve(body)
+            _ = try await run(manager(), app())
+            let range = StubURLProtocol.requests.last?.value(forHTTPHeaderField: "Range")
+            XCTAssertEqual(range != nil, expected != nil, "resume only with a validator: \(headers)")
+        }
+    }
+
     // MARK: Limits and policy
 
     func testCapIsEnforcedOnContentLength() async {
@@ -147,7 +217,7 @@ final class DownloadsManagerTests: XCTestCase {
             .init(headers: ["Content-Length": "100"], chunks: [Data(count: 1500), Data(count: 1500), Data(count: 1500)])
         }
         await expectFailure(.sizeCapExceeded(limit: 4000)) { _ = try await run(manager(maxBytes: 4000), app()) }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: destination().path + ".part"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partFile().path))
     }
 
     func testPlainHTTPIsRefusedWithoutARequest() async throws {
@@ -173,7 +243,7 @@ final class DownloadsManagerTests: XCTestCase {
             .init(headers: ["Content-Length": "3000"], chunks: [body.prefix(1000)])
         }
         await expectFailure(.incomplete(received: 1000, expected: 3000)) { _ = try await run(manager(), app()) }
-        XCTAssertEqual(try Data(contentsOf: destination("com.example.app-1.0.ipa.part")).count, 1000)
+        XCTAssertEqual(try Data(contentsOf: partFile()).count, 1000)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination().path))
     }
 
@@ -195,7 +265,7 @@ final class DownloadsManagerTests: XCTestCase {
             _ = try await run(manager(), app(sha256: wrong))
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination().path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: destination().path + ".part"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partFile().path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.hashesFile.path), "a rejected file is not recorded")
     }
 
@@ -260,7 +330,7 @@ final class DownloadsManagerTests: XCTestCase {
 
     func testCancellingStopsTheTransferKeepsThePartAndALaterRunResumes() async throws {
         StubURLProtocol.handler = { [body] _ in
-            .init(headers: ["Content-Length": "3000"], chunks: [body.prefix(1000)], hang: true)
+            .init(headers: ["Content-Length": "3000", "ETag": "\"v1\""], chunks: [body.prefix(1000)], hang: true)
         }
         let stream = manager().download(app().1, of: app().0)
         let sawProgress = expectation(description: "first progress")
@@ -274,7 +344,7 @@ final class DownloadsManagerTests: XCTestCase {
         _ = try? await consumer.value
 
         try await waitUntil { StubURLProtocol.stopCount > 0 }
-        XCTAssertEqual(try Data(contentsOf: destination("com.example.app-1.0.ipa.part")), body.prefix(1000))
+        XCTAssertEqual(try Data(contentsOf: partFile()), body.prefix(1000))
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination().path))
 
         serve(body)
