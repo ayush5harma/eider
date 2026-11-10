@@ -82,7 +82,18 @@ public actor SourceStore {
         guard URLPolicy.isAllowed(url, allowFile: true) else {
             throw CatalogFailure.blockedURL(url.absoluteString)
         }
-        return try SourceParser.parse(data: try await fetch(url), from: url)
+        var source = try SourceParser.parse(data: try await fetch(url), from: url)
+        source.fetchedAt = wholeSeconds(source.fetchedAt)
+        return source
+    }
+
+    /// The file stores seconds since 1970 but a `Date` counts from 2001, and
+    /// adding the 31-year offset rounds a fractional date to a neighbouring
+    /// double about half the time (measured: 9 of 16 runs of the persistence
+    /// test failed). Whole seconds are exact in both counts, and "last
+    /// refreshed" is never shown finer than that.
+    private static func wholeSeconds(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
     }
 
     private static func attempt(_ url: URL, using fetch: SourceFetch) async -> Result<CatalogSource, Error> {

@@ -59,6 +59,22 @@ final class CatalogStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.first?.apps.first?.bundleID, "com.a")
     }
 
+    /// A Date is seconds since 2001 and the file stores seconds since 1970; the
+    /// conversion rounds, so an arbitrary `Date()` came back a ulp off about half
+    /// the time. Many stamps in one run make that failure certain, not occasional.
+    func testFetchedAtSurvivesTheFileExactlyEveryTime() async throws {
+        let paths = try CatalogFixtures.temporaryHome()
+        let fake = FakeFetch()
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A")]))
+        let writer = SourceStore(paths: paths, fetch: fake.fetch)
+        for round in 0..<60 {
+            let saved = try await writer.add(url: urlA)
+            let reloaded = try await SourceStore(paths: paths, fetch: fake.fetch).sources
+            XCTAssertEqual(reloaded, [saved], "round \(round)")
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+
     func testAddingAKnownURLRefreshesInPlace() async throws {
         let paths = try CatalogFixtures.temporaryHome()
         let fake = FakeFetch()
