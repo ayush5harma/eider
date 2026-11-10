@@ -26,6 +26,14 @@ struct CommonOptions: ParsableArguments {
     }
 }
 
+/// A bundle id typed on the command line becomes a path (the data container),
+/// so it gets the same check as one read from an IPA.
+func requireBundleID(_ text: String) throws {
+    guard BundleIdentifier.isValid(text) else {
+        throw ValidationError("\(text) is not a bundle id: use dot-separated letters, digits, - and _ (for example com.example.app).")
+    }
+}
+
 /// Parses the text of a source address: an https or loopback URL, or a path to
 /// a local file (handy for testing a source before publishing it).
 func sourceURL(from text: String) throws -> URL {

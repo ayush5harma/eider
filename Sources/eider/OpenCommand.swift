@@ -15,6 +15,8 @@ struct OpenCommand: AsyncParsableCommand {
 
     @OptionGroup var common: CommonOptions
 
+    func validate() throws { try requireBundleID(bundleID) }
+
     func run() async throws {
         try await common.guarded { output in
             let app = try await LaunchOutcome.installedApp(bundleID)

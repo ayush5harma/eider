@@ -41,10 +41,8 @@ struct BundleIdentity {
     let minimumOS: String?
 
     /// Reverse-DNS and nothing else: the id becomes a path (the container) and an
-    /// IPA is untrusted, so "../../Documents" is refused before it is used.
-    static func isPlausibleBundleID(_ id: String) -> Bool {
-        !id.isEmpty && !id.contains("..") && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
-    }
+    /// IPA is untrusted, so "../../Documents" and "." are refused before use.
+    static func isPlausibleBundleID(_ id: String) -> Bool { BundleIdentifier.isValid(id) }
 
     static func isPlausibleExecutableName(_ name: String) -> Bool {
         !name.isEmpty && !name.contains("/") && name != "." && name != ".."

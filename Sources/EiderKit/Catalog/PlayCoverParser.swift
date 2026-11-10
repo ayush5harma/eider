@@ -36,6 +36,10 @@ enum PlayCoverParser {
             context.warn("\(label): no bundle id, skipped")
             return nil
         }
+        guard BundleIdentifier.isValid(bundleID) else {
+            context.warn("\(label): not a valid bundle id, skipped")
+            return nil
+        }
         guard let name else {
             context.warn("\(label): no name, skipped")
             return nil

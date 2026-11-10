@@ -44,6 +44,10 @@ enum AltStoreParser {
             context.warn("\(label): no bundle identifier, skipped")
             return nil
         }
+        guard BundleIdentifier.isValid(bundleID) else {
+            context.warn("\(label): not a valid bundle identifier, skipped")
+            return nil
+        }
         guard let name else {
             context.warn("\(label): no name, skipped")
             return nil

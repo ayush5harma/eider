@@ -53,6 +53,7 @@ struct InstallCommand: AsyncParsableCommand {
     }
 
     func validate() throws {
+        if let bundleID { try requireBundleID(bundleID) }
         guard version != nil else { return }
         if case .catalog = Self.resolve(target) { return }
         throw ValidationError("--version only applies when installing by bundle id.")
