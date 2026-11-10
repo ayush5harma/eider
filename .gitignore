@@ -14,3 +14,10 @@ __pycache__/
 # Never track a real .ipa or an installed .app bundle in this repo
 *.ipa
 *.app/
+
+# Swift package and app bundle output
+.build/
+build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
