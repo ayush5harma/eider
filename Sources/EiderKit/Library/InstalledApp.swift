@@ -27,7 +27,8 @@ public struct InstalledApp: Codable, Sendable, Equatable, Identifiable {
         self.path = path
         self.sourceURL = sourceURL
         self.ipaSHA256 = ipaSHA256
-        self.options = options
+        // Per-invocation choices are not part of what the app was installed as.
+        self.options = options.withoutPerInvocationFlags
         self.installedAt = installedAt
         self.engineVersion = engineVersion
     }

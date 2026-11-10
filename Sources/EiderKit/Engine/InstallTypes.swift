@@ -73,6 +73,17 @@ public struct InstallOptions: Codable, Sendable, Equatable {
     /// source cannot hand over an IPA that replaces some other app.
     public var expectedBundleID: String?
 
+    /// The options without what belongs to one invocation: `force`,
+    /// `resetData` and `expectedBundleID`. The library records this, so an `update`
+    /// never replays a forced or data-wiping install.
+    public var withoutPerInvocationFlags: InstallOptions {
+        var copy = self
+        copy.force = false
+        copy.resetData = false
+        copy.expectedBundleID = nil
+        return copy
+    }
+
     public static let defaultDestination = URL(fileURLWithPath: "/Applications", isDirectory: true)
 
     public init(
