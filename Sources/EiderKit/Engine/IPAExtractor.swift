@@ -101,15 +101,28 @@ struct IPAExtractor {
         return payload.appendingPathComponent(app, isDirectory: true)
     }
 
+    /// Symlinks resolved as far as the file system can: resolvingSymlinksInPath leaves
+    /// a path that does not exist unresolved (/var stays /var, not /private/var), which
+    /// would make a dangling link inside the bundle look like it points outside.
+    static func resolvedPath(_ url: URL) -> String {
+        var existing = url
+        var tail: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path), existing.path != "/" {
+            tail.insert(existing.lastPathComponent, at: 0)
+            existing.deleteLastPathComponent()
+        }
+        let base = existing.resolvingSymlinksInPath().path
+        return tail.isEmpty ? base : base + "/" + tail.joined(separator: "/")
+    }
+
     func rejectEscapingSymlinks(in directory: URL) throws {
-        let root = directory.resolvingSymlinksInPath().path
+        let root = Self.resolvedPath(directory)
         let keys: [URLResourceKey] = [.isSymbolicLinkKey]
         guard let walker = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys) else { return }
         for case let item as URL in walker {
             guard (try? item.resourceValues(forKeys: Set(keys)).isSymbolicLink) == true,
                   let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: item.path) else { continue }
-            let target = URL(fileURLWithPath: destination, relativeTo: item.deletingLastPathComponent())
-                .standardizedFileURL.resolvingSymlinksInPath().path
+            let target = Self.resolvedPath(URL(fileURLWithPath: destination, relativeTo: item.deletingLastPathComponent()).standardizedFileURL)
             guard target == root || target.hasPrefix(root + "/") else {
                 throw InstallFailure(.unsafeArchive, "The archive contains a symlink that points outside itself (\(item.lastPathComponent) -> \(destination)).")
             }
