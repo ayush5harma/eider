@@ -145,9 +145,9 @@ final class InstallRun: @unchecked Sendable {
             plist.set("MinimumOSVersion", "11.0")
         }
         if options.macIdiom { plist.set("UIDeviceFamily", Self.familiesWithMac(plist.integers("UIDeviceFamily"))) }
-        if let name = options.displayName {
-            plist.set("CFBundleDisplayName", name)
-            plist.set("CFBundleName", name)
+        if options.displayName != nil {
+            plist.set("CFBundleDisplayName", identity.displayName)
+            plist.set("CFBundleName", identity.displayName)
         }
         if options.bundleID != nil { plist.set("CFBundleIdentifier", identity.bundleID) }
         do { try plist.write() } catch {
@@ -205,7 +205,8 @@ final class InstallRun: @unchecked Sendable {
         _ = try? ProcessRunner.run(Self.lsregister, ["-f", target.path])
         return InstalledApp(
             bundleID: identity.bundleID, name: identity.name,
-            version: plist.string("CFBundleShortVersionString") ?? "", build: plist.string("CFBundleVersion") ?? "",
+            version: plist.string("CFBundleShortVersionString").map(DisplayText.sanitized) ?? "",
+            build: plist.string("CFBundleVersion").map(DisplayText.sanitized) ?? "",
             path: target, sourceURL: options.sourceURL, ipaSHA256: options.ipaSHA256, options: options
         )
     }

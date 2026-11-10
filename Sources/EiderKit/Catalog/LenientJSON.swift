@@ -13,6 +13,29 @@ extension Dictionary where Key == String, Value == Any {
         return nil
     }
 
+    /// Like `string`, for a name or version that is shown: control, format and
+    /// bidi characters are removed. Nil when nothing is left.
+    func displayName(_ keys: String...) -> String? {
+        for key in keys {
+            if let text = LenientJSON.text(self[key]) {
+                let cleaned = DisplayText.sanitized(text)
+                if !cleaned.isEmpty { return cleaned }
+            }
+        }
+        return nil
+    }
+
+    /// Like `string`, for prose: line breaks survive, the rest of what `displayName` removes does not.
+    func prose(_ keys: String...) -> String? {
+        for key in keys {
+            if let text = LenientJSON.text(self[key]) {
+                let cleaned = DisplayText.sanitizedProse(text)
+                if !cleaned.isEmpty { return cleaned }
+            }
+        }
+        return nil
+    }
+
     func int64(_ key: String) -> Int64? {
         switch self[key] {
         case let number as NSNumber where !LenientJSON.isBoolean(number):
