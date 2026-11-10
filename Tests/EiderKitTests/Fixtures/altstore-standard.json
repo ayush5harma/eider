@@ -1,0 +1,62 @@
+{
+  "name": "Example Repo",
+  "identifier": "com.example.repo",
+  "subtitle": "Fixtures",
+  "description": "A hand-written source.",
+  "website": "https://example.com",
+  "iconURL": "icon.png",
+  "headerURL": "https://cdn.example.com/header.png",
+  "tintColor": "#112233",
+  "somethingNew": {"ignored": true},
+  "apps": [
+    {
+      "name": "Alpha",
+      "bundleIdentifier": "com.example.alpha",
+      "developerName": "Dev One",
+      "subtitle": "First",
+      "localizedDescription": "Alpha does things.",
+      "iconURL": "https://cdn.example.com/alpha.png",
+      "tintColor": "ff8800",
+      "category": "utilities",
+      "screenshots": {
+        "iphone": [{"imageURL": "https://cdn.example.com/a1.png", "width": 1170, "height": 2532}],
+        "ipad": ["https://cdn.example.com/a2.png"]
+      },
+      "versions": [
+        {
+          "version": "1.0",
+          "buildVersion": "1",
+          "date": "2024-01-02T03:04:05Z",
+          "localizedDescription": "First release",
+          "downloadURL": "https://cdn.example.com/alpha-1.0.ipa",
+          "size": 1000,
+          "minOSVersion": "14.0"
+        },
+        {
+          "version": "1.1",
+          "buildVersion": "2",
+          "date": "2024-03-04T10:20:30.123Z",
+          "localizedDescription": "Fixes",
+          "downloadURL": "https://cdn.example.com/alpha-1.1.ipa",
+          "size": "2048",
+          "minOSVersion": "14.0",
+          "maxOSVersion": "17.9",
+          "sha256": "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"
+        }
+      ]
+    }
+  ],
+  "featuredApps": ["com.example.alpha"],
+  "news": [
+    {
+      "identifier": "n1",
+      "title": "Launch",
+      "caption": "We are live",
+      "date": "2024-05-06",
+      "url": "https://example.com/post",
+      "imageURL": "news.png",
+      "appID": "com.example.alpha",
+      "tintColor": "#abcdef"
+    }
+  ]
+}

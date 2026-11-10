@@ -1,0 +1,17 @@
+{
+  "name": "Legacy Repo",
+  "apps": [
+    {
+      "name": "Beta",
+      "bundleIdentifier": "com.example.beta",
+      "localizedDescription": "Old style entry.",
+      "iconURL": "https://cdn.example.com/beta.png",
+      "screenshotURLs": ["https://cdn.example.com/b1.png", "https://cdn.example.com/b2.png"],
+      "version": "2.5",
+      "versionDate": "2023-11-30",
+      "versionDescription": "Legacy notes",
+      "downloadURL": "https://cdn.example.com/beta.ipa",
+      "size": 4096
+    }
+  ]
+}

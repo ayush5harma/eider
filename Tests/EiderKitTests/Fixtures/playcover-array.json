@@ -1,0 +1,10 @@
+[
+  {"bundleID": "com.example.game", "name": "Game", "version": "1.2.3",
+   "itunesLookup": "https://itunes.apple.com/lookup?bundleId=com.example.game",
+   "link": "https://cdn.example.com/game.ipa",
+   "checksum": "ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789"},
+  {"bundleID": "com.example.other", "name": "Other", "version": "9",
+   "itunesLookup": "", "link": "files/other.ipa", "checksum": "deadbeef"},
+  {"bundleID": "com.example.nolink", "name": "No Link", "version": "1", "itunesLookup": ""},
+  {"name": "No Bundle", "version": "1", "link": "https://cdn.example.com/y.ipa"}
+]

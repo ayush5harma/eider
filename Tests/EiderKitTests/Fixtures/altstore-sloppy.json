@@ -1,0 +1,25 @@
+{
+  "name": "Sloppy",
+  "apps": [
+    {"name": "No Bundle", "versions": [{"version": "1", "downloadURL": "https://cdn.example.com/x.ipa"}]},
+    {"bundleIdentifier": "com.example.noname", "versions": [{"version": "1", "downloadURL": "https://cdn.example.com/x.ipa"}]},
+    {"name": "No Download", "bundleIdentifier": "com.example.nodl", "versions": [{"version": "1"}]},
+    {"name": "Insecure", "bundleIdentifier": "com.example.http", "versions": [{"version": "1", "downloadURL": "http://cdn.example.com/x.ipa"}]},
+    "not an object",
+    {
+      "name": "Good",
+      "bundleIdentifier": "com.example.good",
+      "iconURL": "javascript:alert(1)",
+      "screenshots": [
+        {"imageURL": "https://cdn.example.com/g1.png", "width": "100", "height": "200"},
+        {"imageURL": "http://cdn.example.com/insecure.png"},
+        {"imageURL": "https://cdn.example.com/g2.png"}
+      ],
+      "versions": [
+        {"version": 3, "date": "2024-02-01T00:00:00", "downloadURL": "https://cdn.example.com/g3.ipa", "size": "12abc", "sha256": "nothex"},
+        {"version": "4", "date": "2024-06-01 12:00:00", "downloadURL": "https://cdn.example.com/g4.ipa", "size": 5.0e3},
+        {"version": "2", "date": "2024-01-01T00:00:00+0530", "downloadURL": "/rel/g2.ipa"}
+      ]
+    }
+  ]
+}

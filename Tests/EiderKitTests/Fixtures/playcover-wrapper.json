@@ -1,0 +1,5 @@
+{"name": "PC Source", "id": "pc.source.id", "data": [
+  {"bundleID": "com.example.wrapped", "name": "Wrapped", "version": "2.0",
+   "itunesLookup": "https://itunes.apple.com/lookup?bundleId=com.example.wrapped",
+   "link": "https://cdn.example.com/wrapped.ipa"}
+]}
