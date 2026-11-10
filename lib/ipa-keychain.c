@@ -446,12 +446,13 @@ static CFTypeRef format_item(CFDictionaryRef item, CFDictionaryRef q) {
 //
 // So the real functions are kept in ordinary data instead. dyld binds these
 // pointers when it loads the image, before any initializer can run, with the
-// same no-self-interposing rule; pointer-rewriting hooks walk only the
-// symbol-pointer sections, never __data. volatile stops the compiler folding
-// a call back into one through __got. Not dlsym: from inside an interposing
-// image every form of it -- the Security handle, RTLD_DEFAULT, RTLD_NEXT --
-// answers the interposed function, i.e. this shim, and the passthrough
-// became a call to itself (measured on macOS 27.3, same day).
+// same no-self-interposing rule; fishhook-style hooks walk only the
+// symbol-pointer sections, never __data (a hooker that rewrote every bind by
+// name would reach these too; none is known). volatile stops the compiler
+// folding a call back into one through __got. Not dlsym: from inside an
+// interposing image every form of it -- the Security handle, RTLD_DEFAULT,
+// RTLD_NEXT -- answers the interposed function, i.e. this shim, and the
+// passthrough became a call to itself (measured on macOS 27.3, same day).
 static struct {
     OSStatus (*volatile copy)(CFDictionaryRef, CFTypeRef *);
     OSStatus (*volatile add)(CFDictionaryRef, CFTypeRef *);

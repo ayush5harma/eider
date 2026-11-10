@@ -17,7 +17,9 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W=$(mktemp -d "${TMPDIR:-/tmp}/ipa-rebind.XXXXXX")
-trap 'rm -rf "$W"' EXIT
+PID=""
+# The probe runs in the background: a Ctrl-C mid-wait must not leave it spinning.
+trap '[ -z "$PID" ] || kill -9 "$PID" 2>/dev/null; rm -rf "$W"' EXIT
 PASS=0; FAIL=0
 
 ok()  { echo "  PASS  $*"; PASS=$((PASS + 1)); }
@@ -62,6 +64,8 @@ check "every call went through a hook" \
 for op in copy add update delete; do
   check "key class: SecItem $op reached the real keychain" real_status "$op"
 done
+# The real keychain refuses an add with no key in it; the shim would take it.
+check "key class: the add was refused (not kept by the shim)" test "$(field passthrough add)" != 0
 check "password class: the shim answered (miss, add, update, delete)" \
   test "$(line shim)" = "shim copy=-25300 add=0 update=0 delete=0"
 

@@ -306,7 +306,7 @@ the `--playtools` part.
 next to a library that hooks `SecItem*` by rewriting symbol pointers
 (`test/rebind-hook.c`, the way Watusi's `libWatusiToolsSL.dylib` does), and
 checks that every call comes back -- for keys, which the shim passes on to the
-real keychain, as much as for passwords, which it answers itself. 8 checks.
+real keychain, as much as for passwords, which it answers itself. 9 checks.
 
 ## Measured details
 
