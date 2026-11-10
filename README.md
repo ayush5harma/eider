@@ -305,6 +305,12 @@ so the terminal needs Accessibility; without it that one check is skipped,
 loudly. The suite needs Xcode's iOS SDK, and the one-time PlayTools build for
 the `--playtools` part.
 
+`test/keychain-rebind.sh` needs no app and no GUI. It runs the keychain shim
+next to a library that hooks `SecItem*` by rewriting symbol pointers
+(`test/rebind-hook.c`, the way Watusi's `libWatusiToolsSL.dylib` does), and
+checks that every call comes back -- for keys, which the shim passes on to the
+real keychain, as much as for passwords, which it answers itself. 9 checks.
+
 ## Measured details
 
 Everything below was measured rather than assumed; each is why the code does

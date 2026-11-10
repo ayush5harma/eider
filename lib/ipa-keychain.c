@@ -431,10 +431,39 @@ static CFTypeRef format_item(CFDictionaryRef item, CFDictionaryRef q) {
     return out;
 }
 
+// ── The real keychain, for the classes the shim does not keep ───────────────
+// Keys, certificates and identities go on to Security -- but not by calling
+// SecItemCopyMatching by name. That call goes through this library's symbol
+// pointer (__got), which dyld binds to the real function (an interposing
+// image is never interposed itself) and which a tweak that hooks by
+// rewriting symbol pointers, fishhook style, rewrites in every image, this
+// one included. Watusi's libWatusiToolsSL does exactly that, and the
+// "original" it keeps is the main executable's pointer, which dyld had
+// already aimed at this shim: the tweak called the shim, the shim passed a
+// key query on to the tweak, and WhatsApp 26.42.77 overflowed its stack
+// 6,679 calls deep at every launch (measured 2026-11-11; reproduced by
+// test/keychain-rebind.sh).
+//
+// So the real functions are kept in ordinary data instead. dyld binds these
+// pointers when it loads the image, before any initializer can run, with the
+// same no-self-interposing rule; fishhook-style hooks walk only the
+// symbol-pointer sections, never __data (a hooker that rewrote every bind by
+// name would reach these too; none is known). volatile stops the compiler
+// folding a call back into one through __got. Not dlsym: from inside an
+// interposing image every form of it -- the Security handle, RTLD_DEFAULT,
+// RTLD_NEXT -- answers the interposed function, i.e. this shim, and the
+// passthrough became a call to itself (measured on macOS 27.3, same day).
+static struct {
+    OSStatus (*volatile copy)(CFDictionaryRef, CFTypeRef *);
+    OSStatus (*volatile add)(CFDictionaryRef, CFTypeRef *);
+    OSStatus (*volatile update)(CFDictionaryRef, CFDictionaryRef);
+    OSStatus (*volatile del)(CFDictionaryRef);
+} g_real = { SecItemCopyMatching, SecItemAdd, SecItemUpdate, SecItemDelete };
+
 // ── The four entry points ───────────────────────────────────────────────────
 
 static OSStatus ipa_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
-    if (!query || !is_password_class(query)) return SecItemCopyMatching(query, result);
+    if (!query || !is_password_class(query)) return g_real.copy(query, result);
     pthread_mutex_lock(&g_lock);
     load_items();
     CFMutableArrayRef hits = find_matches(query);
@@ -466,7 +495,7 @@ static OSStatus ipa_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result
 }
 
 static OSStatus ipa_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
-    if (!attributes || !is_password_class(attributes)) return SecItemAdd(attributes, result);
+    if (!attributes || !is_password_class(attributes)) return g_real.add(attributes, result);
     pthread_mutex_lock(&g_lock);
     load_items();
     CFMutableDictionaryRef item = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
@@ -499,7 +528,7 @@ static OSStatus ipa_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
 }
 
 static OSStatus ipa_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef update) {
-    if (!query || !update || !is_password_class(query)) return SecItemUpdate(query, update);
+    if (!query || !update || !is_password_class(query)) return g_real.update(query, update);
     pthread_mutex_lock(&g_lock);
     load_items();
     CFMutableArrayRef hits = find_matches(query);
@@ -522,7 +551,7 @@ static OSStatus ipa_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef update)
 }
 
 static OSStatus ipa_SecItemDelete(CFDictionaryRef query) {
-    if (!query || !is_password_class(query)) return SecItemDelete(query);
+    if (!query || !is_password_class(query)) return g_real.del(query);
     pthread_mutex_lock(&g_lock);
     load_items();
     OSStatus rc = errSecItemNotFound;
