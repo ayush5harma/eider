@@ -105,9 +105,6 @@ final class EngineArchiveTests: XCTestCase {
     func testUnsupportedAndInvalidOptionsFailBeforeAnyWork() async throws {
         let scratch = try EngineScratch()
         let ipa = scratch.url("none.ipa")   // never opened: the options are refused first
-        var reset = options(scratch)
-        reset.resetData = true
-        await assertFailure(.unsupportedOption, ipa, try installer(scratch), reset)
         var source = options(scratch)
         source.extraDylibs = [scratch.url("extra.c")]
         await assertFailure(.unsupportedOption, ipa, try installer(scratch), source)

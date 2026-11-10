@@ -11,6 +11,7 @@ final class InstallRun: @unchecked Sendable {
     private let options: InstallOptions
     private let shims: ShimLocator
     private let extractor: IPAExtractor
+    private let reset: DataReset
     private let onEvent: @Sendable (InstallEvent) -> Void
 
     private var plist: InfoPlist!
@@ -18,11 +19,12 @@ final class InstallRun: @unchecked Sendable {
     private var converter: BundleConverter!
     private var app: URL!
 
-    init(ipa: URL, options: InstallOptions, shims: ShimLocator, extractor: IPAExtractor, onEvent: @escaping @Sendable (InstallEvent) -> Void) {
+    init(ipa: URL, options: InstallOptions, shims: ShimLocator, extractor: IPAExtractor, reset: DataReset, onEvent: @escaping @Sendable (InstallEvent) -> Void) {
         self.ipa = ipa
         self.options = options
         self.shims = shims
         self.extractor = extractor
+        self.reset = reset
         self.onEvent = onEvent
     }
 
@@ -33,9 +35,6 @@ final class InstallRun: @unchecked Sendable {
     // MARK: Pipeline
 
     func execute() throws -> InstalledApp {
-        if options.resetData {
-            throw InstallFailure(.unsupportedOption, "Resetting the app's data during an install is not supported yet. Remove the app with its data first.")
-        }
         let extras = try options.extraDylibs.map { (source: $0, name: try ShimLinker.extraLibraryName(for: $0)) }
         for source in options.extraDylibs where !FileManager.default.isReadableFile(atPath: source.path) {
             throw InstallFailure(.invalidOption, "The library \(source.path) does not exist.")
@@ -80,6 +79,7 @@ final class InstallRun: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: app.appendingPathComponent(identity.executable).path) else {
             throw InstallFailure(.badBundle, "The executable \(identity.executable) is not in the bundle.")
         }
+        if options.resetData { try reset.refuseIfRunning(name: identity.name) }
         emit(.validate, "\(identity.name) (\(identity.bundleID)), executable \(identity.executable), iOS \(identity.minimumOS ?? "?")+", 0.22)
     }
 
@@ -193,6 +193,7 @@ final class InstallRun: @unchecked Sendable {
         }
         let target = destination.appendingPathComponent("\(identity.name).app", isDirectory: true)
         try moveExistingCopyAside(target)
+        if options.resetData, let note = reset.clear(bundleID: identity.bundleID) { emit(.place, note, 0.96) }
         do { try FileManager.default.moveItem(at: app, to: target) } catch {
             throw InstallFailure(.placementFailed, "Could not move the app into \(destination.path): \(error.localizedDescription)")
         }

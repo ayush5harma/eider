@@ -30,6 +30,8 @@ public struct InstallFailure: Error, Sendable, Equatable, LocalizedError, Custom
         case missingShim, signingFailed, verificationFailed
         case destinationUnusable, destinationConflict, placementFailed
         case unsupportedOption, invalidOption
+        /// A reset was asked for while the app is running.
+        case appRunning
     }
 
     public let code: Code
@@ -55,7 +57,7 @@ public struct InstallOptions: Codable, Sendable, Equatable {
     public var displayName: String?
     public var bundleID: String?
     public var removeExtensions: Bool
-    /// Not supported yet: the install fails clearly when this is set.
+    /// Empty the sandbox container before placing the app; refused while it runs.
     public var resetData: Bool
     /// Replace a same-named bundle even when its bundle id differs.
     public var force: Bool

@@ -12,6 +12,7 @@ public struct Installer: Sendable {
     private let shims: ShimLocator
     private let extractor: IPAExtractor
     private let store: LibraryStore
+    private let reset: DataReset
 
     public init(
         paths: EiderPaths = EiderPaths(),
@@ -19,8 +20,14 @@ public struct Installer: Sendable {
         store: LibraryStore? = nil,
         maxUncompressedBytes: UInt64 = Installer.defaultMaxUncompressedBytes
     ) {
+        self.init(paths: paths, shims: shims, store: store, maxUncompressedBytes: maxUncompressedBytes, reset: .standard)
+    }
+
+    /// Tests point `reset` at a scratch containers folder and a stubbed running check.
+    init(paths: EiderPaths, shims: ShimLocator, store: LibraryStore?, maxUncompressedBytes: UInt64, reset: DataReset) {
         self.shims = shims
         self.store = store ?? LibraryStore(paths: paths)
+        self.reset = reset
         extractor = IPAExtractor(maxUncompressedBytes: maxUncompressedBytes)
     }
 
@@ -32,7 +39,7 @@ public struct Installer: Sendable {
         options: InstallOptions = InstallOptions(),
         onEvent: @escaping @Sendable (InstallEvent) -> Void = { _ in }
     ) async throws -> InstalledApp {
-        let run = InstallRun(ipa: ipa, options: options, shims: shims, extractor: extractor, onEvent: onEvent)
+        let run = InstallRun(ipa: ipa, options: options, shims: shims, extractor: extractor, reset: reset, onEvent: onEvent)
         let app: InstalledApp = try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do { continuation.resume(returning: try run.execute()) } catch { continuation.resume(throwing: error) }
