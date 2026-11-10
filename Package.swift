@@ -22,6 +22,6 @@ let package = Package(
             ]
         ),
         .executableTarget(name: "EiderApp", dependencies: ["EiderKit"]),
-        .testTarget(name: "EiderKitTests", dependencies: ["EiderKit"]),
+        .testTarget(name: "EiderKitTests", dependencies: ["EiderKit"], exclude: ["Fixtures"]),
     ]
 )

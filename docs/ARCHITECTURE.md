@@ -48,6 +48,6 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
 
 ## Reference implementation
 
-`bin/`, `lib/` and `test/` are the shell installer this project grew from
-(`ipa-install-on-mac`). They stay until the Swift engine passes the same
-end-to-end checks, and are the specification for anything not written here.
+`legacy/` (`bin/`, `lib/`, `test/`) is the shell installer this project grew from
+(`ipa-install-on-mac`). It stays until the Swift engine passes the same
+end-to-end checks, and is the specification for anything not written here.
