@@ -13,6 +13,8 @@
 //   text     the text field's contents as typed
 //   keychain a generic password added on the first launch and read back on
 //            every later one (the installer's keychain shim, or PlayChain)
+//   group    an app group's folder and whether a file could be written in it
+//            (the installer's app-group shim puts it inside the container)
 //   gl       which image dlsym(RTLD_DEFAULT, "glCreateShader") resolves to
 //            (the probe links OpenGL ES, so the installer adds its redirect)
 //
@@ -74,6 +76,21 @@ static void keychainRoundTrip(void) {
                          (__bridge id)kSecAttrService: @"ipa-probe", (__bridge id)kSecAttrAccount: @"probe",
                          (__bridge id)kSecValueData: [value dataUsingEncoding:NSUTF8StringEncoding]};
   plog(@"keychain miss=%d add=%d value=%@", (int)rc, (int)SecItemAdd((__bridge CFDictionaryRef)item, NULL), value);
+}
+
+// An app group's folder: ask for it, create it as an app with the real
+// entitlement would find it already created, and write a file into it, as
+// WhatsApp does with its CoreData store. Without the installer's app-group
+// shim the folder is under ~/Library/Group Containers and System Policy
+// denies the create.
+static void groupContainerWrite(void) {
+  NSURL *dir = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:@"group.ipa.probe.shared"];
+  NSURL *file = [dir URLByAppendingPathComponent:@"probe-group.txt"];
+  NSError *error = nil;
+  BOOL wrote = file
+    && [NSFileManager.defaultManager createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:&error]
+    && [@"group" writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:&error];
+  plog(@"group write=%d path=%@ error=%@", wrote, dir.path ?: @"(nil)", error.localizedDescription ?: @"none");
 }
 
 static void glLookup(void) {
@@ -212,6 +229,7 @@ static void glLookup(void) {
   [NSFileManager.defaultManager createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:NULL];
   logPath = [docs stringByAppendingPathComponent:@"probe.log"];
   keychainRoundTrip();
+  groupContainerWrite();
   glLookup();
   return YES;
 }

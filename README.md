@@ -169,7 +169,7 @@ and every step has a direct CLI equivalent:
 The bare iOS `.app` becomes the Mac app, in place: the platform keys in
 `Info.plist` are not touched and the bundle is not wrapped in anything.
 
-Three more things are added because a real *app* needs them:
+Four more things are added because a real *app* needs them:
 
 - **Rendering.** The app keeps the idiom it shipped with, so an iPad app runs
   in its iPad layout, which Catalyst scales to 77% on a Mac. `--mac-idiom`
@@ -180,6 +180,9 @@ Three more things are added because a real *app* needs them:
 - **OpenGL ES**, for apps that link it: run-time GL lookups are answered by
   OpenGL ES rather than desktop OpenGL (see ["OpenGL ES lookups would land in
   desktop OpenGL"](#opengl-es-lookups-would-land-in-desktop-opengl)).
+- **App-group folders it can write**, inside the app's own container, because
+  macOS denies an ad-hoc signed app its app groups. See ["App groups live in
+  the app's container"](#app-groups-live-in-the-apps-container).
 
 The sandbox entitlements are PlayCover's base set: `app-sandbox` plus network
 client and server, camera, microphone, Bluetooth, USB, contacts, calendars,
@@ -285,10 +288,10 @@ is `~/Library/Caches/ipa-install-on-mac`.
 
 `test/e2e.sh` judges the installer by effect. It builds a probe app
 (`test/probe.m`, which logs the idiom, screen, device model, touches, key
-presses, keychain results and GL lookups it sees), installs it three ways,
+presses, keychain results, app-group writes and GL lookups it sees), installs it three ways,
 launches it, and reads what the probe logged after that launch's own marker:
 a default install, `--mac-idiom` with a `--dylib` source, a `--playtools`
-install, and a `--configure` change taking effect on relaunch. 23 checks.
+install, and a `--configure` change taking effect on relaunch. 26 checks.
 
 ```
 test/e2e.sh
@@ -301,6 +304,12 @@ tool must keep working with. The mapped key press goes through System Events,
 so the terminal needs Accessibility; without it that one check is skipped,
 loudly. The suite needs Xcode's iOS SDK, and the one-time PlayTools build for
 the `--playtools` part.
+
+`test/keychain-rebind.sh` needs no app and no GUI. It runs the keychain shim
+next to a library that hooks `SecItem*` by rewriting symbol pointers
+(`test/rebind-hook.c`, the way Watusi's `libWatusiToolsSL.dylib` does), and
+checks that every call comes back -- for keys, which the shim passes on to the
+real keychain, as much as for passwords, which it answers itself. 9 checks.
 
 ## Measured details
 
@@ -372,6 +381,35 @@ app it was built for iOS 14. Google Photos 7.92 (built with the iOS 26.4 SDK)
 then showed no photo grid, no Videos or Creations, and its Recently Added
 grid laid itself out at zero width forever, with the main thread pinned in
 SwiftUI's layout. Stamped with its own 26.4, all of it renders.
+
+### App groups live in the app's container
+
+An iOS app and its extensions share data through an app group: a folder that
+`containerURLForSecurityApplicationGroupIdentifier:` returns, on a Mac under
+`~/Library/Group Containers/<group>`. macOS only lets an app write there if
+its signature carries the group in `com.apple.security.application-groups`,
+and for a `group.`-prefixed id that entitlement has to be backed by a
+provisioning profile -- one that only the group's own team can get, so no
+developer certificate helps with somebody else's app. Without it the
+platform policy denies every write ("System Policy: WhatsApp deny(1)
+file-write-create .../group.net.whatsapp.WhatsApp.shared/Logs"), and a
+`temporary-exception.sbpl` rule in the app's own entitlements does not lift
+that denial: it only governs the app's sandbox, not the policy above it.
+Measured 2026-11-10 on macOS 27.3 with a Watusi build of WhatsApp: CoreData
+could not create its store in the group folder (error 513) and the app
+aborted at launch in `WAHandleFailureInFunction`.
+
+`lib/ipa-groups.m` is linked into every app's main executable and answers
+that call with `Library/Group Containers/<group>` inside the app's own
+sandbox container (`~/Library/Containers/<bundle id>/Data`), creating it on
+first use. It calls the original first and moves only its answer, so a tweak
+that hooks the same call still decides which group a call resolves to; Watusi
+builds `group.com.fouadraheb.watusi.shared` at run time and lands beside
+WhatsApp's own groups. Each app keeps a private copy of each group's data.
+Two limits: an app extension that runs on its own does not get the redirect
+(only the main executable links it), and a library that asks for its group
+folder in its own initializer, before this one has loaded (injected libraries
+load last), gets the real path.
 
 ### OpenGL ES lookups would land in desktop OpenGL
 
