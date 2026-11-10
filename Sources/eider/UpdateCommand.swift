@@ -21,7 +21,7 @@ struct UpdateCommand: AsyncParsableCommand {
     }
 
     func validate() throws {
-        guard (bundleID == nil) != all else {
+        guard (bundleID != nil) != all else {
             throw ValidationError("Give a bundle id, or --all (not both).")
         }
     }

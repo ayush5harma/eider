@@ -8,8 +8,17 @@ enum RunningProcesses {
     /// Process ids whose executable lives inside `bundle` (path prefix, so
     /// `A.app` never matches `A.app.old`).
     static func pids(insideBundle bundle: URL) -> [Int32] {
-        let prefix = bundle.resolvingSymlinksInPath().path + "/"
+        let prefix = physicalPath(bundle.path) + "/"
         return pids { $0.hasPrefix(prefix) }
+    }
+
+    /// The path as the kernel reports it. `URL.resolvingSymlinksInPath` is not
+    /// used: it rewrites /private/var to /var, which then matches no process
+    /// (measured with a bundle under $TMPDIR).
+    static func physicalPath(_ path: String) -> String {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(path, &buffer) != nil else { return path }
+        return String(cString: buffer)
     }
 
     /// Process ids whose executable path contains `fragment`, e.g. `/Name.app/`.
