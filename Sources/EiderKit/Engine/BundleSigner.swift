@@ -43,7 +43,11 @@ struct BundleSigner {
     /// Serial on purpose: signing the main binary and a framework binary of the
     /// same bundle at once failed with "No such file or directory" on the first
     /// end-to-end run (2026-11-11), so the legacy one-at-a-time order is kept.
-    func sign(machOs: [URL]) throws {
+    ///
+    /// A nested bundle that will not sign is not an install failure by itself (an
+    /// iOS bundle can carry resource bundles codesign has no use for), but it is
+    /// reported through `warn` instead of vanishing; `verify` is the gate.
+    func sign(machOs: [URL], warn: (String) -> Void = { _ in }) throws {
         for file in machOs {
             let result = try ProcessRunner.run(Self.codesign, ["--force", "--sign", "-", file.path])
             guard result.succeeded else {
@@ -51,7 +55,12 @@ struct BundleSigner {
             }
         }
         for bundle in nestedBundles() {
-            _ = try? ProcessRunner.run(Self.codesign, ["--force", "--sign", "-", bundle.path])
+            do {
+                let result = try ProcessRunner.run(Self.codesign, ["--force", "--sign", "-", bundle.path])
+                if !result.succeeded { warn("Could not sign the nested bundle \(relative(bundle)): \(result.errorLine)") }
+            } catch {
+                warn("Could not sign the nested bundle \(relative(bundle)): \(error)")
+            }
         }
         let entitlementsFile = workDirectory.appendingPathComponent("entitlements.plist")
         try Self.entitlements.write(to: entitlementsFile, atomically: true, encoding: .utf8)

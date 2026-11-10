@@ -188,7 +188,7 @@ final class InstallRun: @unchecked Sendable {
     private func sign(_ machOs: [URL], work: URL) throws {
         emit(.sign, "Signing \(machOs.count) binaries (ad hoc)", 0.72)
         let signer = BundleSigner(app: app, workDirectory: work, relative: converter.relative)
-        try signer.sign(machOs: machOs)
+        try signer.sign(machOs: machOs, warn: { [weak self] in self?.emit(.warning, $0, 0.85) })
         emit(.verify, "Verifying signatures", 0.9)
         try signer.verify(machOs: machOs)
         BundleSigner.clearQuarantine(under: app)
