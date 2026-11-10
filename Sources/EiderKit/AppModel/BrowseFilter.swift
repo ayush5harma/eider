@@ -31,6 +31,10 @@ extension SourcedApp: Identifiable {
     public var id: String { "\(source.url.absoluteString)|\(app.bundleID)" }
 }
 
+extension CatalogSource: Identifiable {
+    public var id: URL { url }
+}
+
 /// Where an app in Browse stands against the library.
 public enum InstallStatus: Equatable, Sendable {
     case notInstalled
