@@ -2,14 +2,11 @@ import ArgumentParser
 import EiderKit
 
 @main
-struct EiderCommand: ParsableCommand {
+struct EiderCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "eider",
         abstract: "Install iOS apps from sources as Mac apps.",
-        version: EiderVersion.current
+        version: EiderVersion.current,
+        subcommands: [InstallCommand.self, UninstallCommand.self]
     )
-
-    func run() throws {
-        print(Self.helpMessage())
-    }
 }
