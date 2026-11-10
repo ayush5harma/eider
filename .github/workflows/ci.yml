@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    # macos-26 is the newest Apple silicon image in the actions/runner-images
+    # README (macos-latest points at it too); macos-14 images were retired
+    # on 2026-11-02.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Build shims
+        run: |
+          if [ -x Scripts/build-shims.sh ]; then
+            Scripts/build-shims.sh
+          else
+            echo "Scripts/build-shims.sh not present; skipping"
+          fi
+
+      - name: Assemble app bundle
+        run: Scripts/make-app.sh
+
+      - name: Verify signature
+        run: codesign --verify --strict --verbose=2 build/Eider.app
