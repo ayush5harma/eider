@@ -27,9 +27,16 @@ public enum URLPolicy {
         return isAllowed(url, allowFile: allowFile) ? url : nil
     }
 
-    private static func isLoopback(_ host: String) -> Bool {
+    /// `localhost`, `::1` and the real 127.0.0.0/8 block. A prefix test let
+    /// "127.evil.example.com" through, so the host is parsed as four decimal octets.
+    static func isLoopback(_ host: String) -> Bool {
         let bare = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        return bare == "localhost" || bare == "::1" || bare == "127.0.0.1"
-            || (bare.hasPrefix("127.") && bare.split(separator: ".").count == 4)
+        if bare == "localhost" || bare == "::1" { return true }
+        let octets = bare.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return false }
+        let values = octets.map { octet -> Int? in
+            octet.count <= 3 && octet.allSatisfy { $0.isASCII && $0.isNumber } ? Int(octet) : nil
+        }
+        return values.allSatisfy { ($0 ?? 256) <= 255 } && values.first == 127
     }
 }
