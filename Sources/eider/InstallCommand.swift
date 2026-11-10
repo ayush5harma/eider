@@ -2,45 +2,17 @@ import ArgumentParser
 import EiderKit
 import Foundation
 
-private struct EventLine: Encodable {
-    let type = "event"
-    let step: InstallStep
-    let message: String
-    let fraction: Double
-}
-
-private struct ResultLine: Encodable {
-    let type = "result"
-    let app: InstalledApp
-}
-
-private struct ErrorLine: Encodable {
-    let type = "error"
-    let code: String
-    let message: String
-}
-
-private func jsonLine<T: Encodable>(_ value: T) {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    encoder.dateEncodingStrategy = .iso8601
-    guard let data = try? encoder.encode(value), let text = String(data: data, encoding: .utf8) else { return }
-    print(text)
-    fflush(stdout)
-}
-
-private func writeError(_ text: String) {
-    FileHandle.standardError.write(Data((text + "\n").utf8))
-}
-
 struct InstallCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "install",
-        abstract: "Install a decrypted .ipa as a Mac app."
+        abstract: "Install an app from a decrypted .ipa, an https address or a source, as a Mac app."
     )
 
-    @Argument(help: "The decrypted .ipa to install.")
-    var ipa: String
+    @Argument(help: "A .ipa file, an https address of one, or the bundle id of an app in your sources.")
+    var target: String
+
+    @Option(help: "Install this version (bundle id installs only; default is the newest).")
+    var version: String?
 
     @Option(name: .customLong("dest"), help: "Install into this folder instead of /Applications.")
     var destination: String = "/Applications"
@@ -54,59 +26,93 @@ struct InstallCommand: AsyncParsableCommand {
     @Option(name: .customLong("dylib"), help: "Also link this prebuilt .dylib into the app (repeatable).")
     var dylibs: [String] = []
 
+    @Option(name: .customLong("name"), help: "Install under this name instead of the app's own.")
+    var displayName: String?
+
+    @Option(name: .customLong("bundle-id"), help: "Install under this bundle id instead of the app's own.")
+    var bundleID: String?
+
+    @Flag(name: .customLong("remove-extensions"), help: "Drop app extensions (a common reason an app fails to sign or open).")
+    var removeExtensions = false
+
+    @Flag(name: .customLong("reset"), help: "Clear the app's saved data first (the app must be quit).")
+    var reset = false
+
     @Flag(help: "Replace a same-named app even if its bundle id differs.")
     var force = false
 
-    @Flag(help: "Print one JSON object per event and a final result object.")
-    var json = false
+    @OptionGroup var common: CommonOptions
+
+    private struct Payload: Encodable { let app: InstalledApp }
+
+    /// What `target` names.
+    enum Source: Equatable {
+        case localFile(URL)
+        case address(URL)
+        case catalog(String)
+    }
+
+    func validate() throws {
+        guard version != nil else { return }
+        if case .catalog = Self.resolve(target) { return }
+        throw ValidationError("--version only applies when installing by bundle id.")
+    }
 
     func run() async throws {
-        let options = InstallOptions(
-            destination: URL(fileURLWithPath: destination, isDirectory: true),
+        try await common.guarded { output in
+            let operations = AppOperations()
+            let options = makeOptions()
+            let onEvent = output.progressHandler()
+            let app: InstalledApp
+            switch Self.resolve(target) {
+            case .localFile(let file):
+                app = try await operations.install(localIPA: file, options: options, onEvent: onEvent)
+            case .address(let url):
+                app = try await operations.install(ipaURL: url, options: options, onEvent: onEvent)
+            case .catalog(let id):
+                guard let entry = try await operations.catalogEntry(bundleID: id) else {
+                    throw OperationFailure.notInCatalogForCLI(id)
+                }
+                let release = try version.map { try AppOperations.version($0, of: entry.app) }
+                app = try await operations.install(app: entry.app, version: release, from: entry.source, options: options, onEvent: onEvent)
+            }
+            output.result(Payload(app: app), text: "Installed \(app.path.path)")
+        }
+    }
+
+    func makeOptions() -> InstallOptions {
+        InstallOptions(
+            destination: URL(fileURLWithPath: (destination as NSString).expandingTildeInPath, isDirectory: true),
             macIdiom: macIdiom,
             keychainShim: !noKeychain,
-            extraDylibs: dylibs.map { URL(fileURLWithPath: $0) },
+            extraDylibs: dylibs.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) },
+            displayName: displayName,
+            bundleID: bundleID,
+            removeExtensions: removeExtensions,
+            resetData: reset,
             force: force
         )
-        let asJSON = json
-        do {
-            let app = try await Installer().install(ipa: URL(fileURLWithPath: ipa), options: options) { event in
-                if asJSON {
-                    jsonLine(EventLine(step: event.step, message: event.message, fraction: event.fraction))
-                } else {
-                    writeError(String(format: "[%3d%%] %@", Int(event.fraction * 100), event.message))
-                }
-            }
-            if asJSON { jsonLine(ResultLine(app: app)) } else { print("Installed \(app.path.path)") }
-        } catch let failure as InstallFailure {
-            if asJSON { jsonLine(ErrorLine(code: failure.code.rawValue, message: failure.message)) } else {
-                writeError("eider: \(failure.message) (\(failure.code.rawValue))")
-            }
-            throw ExitCode.failure
+    }
+
+    /// An existing file wins; then an address (or an `eider://install/` link);
+    /// anything that looks like a path but is not there is a missing file, not a
+    /// bundle id; the rest is a bundle id.
+    static func resolve(_ text: String) -> Source {
+        let expanded = (text as NSString).expandingTildeInPath
+        if FileManager.default.fileExists(atPath: expanded) { return .localFile(URL(fileURLWithPath: expanded)) }
+        if let url = URL(string: text), let scheme = url.scheme?.lowercased() {
+            if scheme == "eider", case .install(let inner)? = DeepLink.parse(url) { return .address(inner) }
+            if scheme == "https" || scheme == "http" || scheme == "file" { return .address(url) }
         }
+        if text.contains("/") || text.lowercased().hasSuffix(".ipa") { return .localFile(URL(fileURLWithPath: expanded)) }
+        return .catalog(text)
     }
 }
 
-struct UninstallCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "uninstall",
-        abstract: "Move an installed app to the Trash and forget it."
-    )
-
-    @Argument(help: "The app's bundle id.")
-    var bundleID: String
-
-    @Flag(name: .customLong("remove-data"), help: "Also move the app's data container to the Trash.")
-    var removeData = false
-
-    func run() async throws {
-        let uninstaller = Uninstaller(store: LibraryStore())
-        do {
-            try await uninstaller.uninstall(bundleID: bundleID, removeData: removeData)
-            print("Removed \(bundleID)")
-        } catch let failure as UninstallFailure {
-            writeError("eider: \(failure.message)")
-            throw ExitCode.failure
-        }
+extension OperationFailure {
+    fileprivate static func notInCatalogForCLI(_ bundleID: String) -> OperationFailure {
+        OperationFailure(
+            code: "operations.not_in_catalog",
+            message: "None of your sources lists \(bundleID), and no file or address has that name. Add a source with: eider source add <url>")
     }
 }

@@ -6,9 +6,13 @@ public typealias SourceFetch = @Sendable (URL) async throws -> Data
 
 public enum SourceFetcher {
     public static let maxBytes: Int64 = 20 * 1024 * 1024
-    public static let timeout: TimeInterval = 30
+    /// Seconds without a single byte arriving before the fetch fails.
+    public static let idleTimeout: TimeInterval = 30
+    /// Backstop for a server that trickles bytes forever: 15 minutes moves the
+    /// 20 MB cap at about 23 KB/s, slower than any link worth fetching over.
+    public static let overallTimeout: TimeInterval = 900
 
-    /// URLSession, 30 s, 20 MB, URL policy on the address and on every redirect.
+    /// URLSession, 30 s idle, 20 MB, URL policy on the address and on every redirect.
     public static let `default`: SourceFetch = { url in
         try await fetch(url, configuration: .ephemeral, maxBytes: maxBytes)
     }
@@ -20,12 +24,11 @@ public enum SourceFetcher {
         if url.isFileURL { return try readFile(url, maxBytes: maxBytes) }
 
         let configuration = configuration.copy() as? URLSessionConfiguration ?? configuration
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
+        configure(configuration)
         let transfer = HTTPTransfer(configuration: configuration)
         defer { transfer.invalidate() }
 
-        var request = URLRequest(url: url, timeoutInterval: timeout)
+        var request = URLRequest(url: url, timeoutInterval: idleTimeout)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         var body = Data()
         do {
@@ -48,6 +51,14 @@ public enum SourceFetcher {
             throw CatalogFailure.fetchFailed(error.localizedDescription)
         }
         return body
+    }
+
+    /// `timeoutIntervalForRequest` is URLSession's idle timer (it restarts with every
+    /// packet); the whole-transfer timer is `timeoutIntervalForResource`, which
+    /// used to equal it and failed a large source on a slow link.
+    static func configure(_ configuration: URLSessionConfiguration) {
+        configuration.timeoutIntervalForRequest = idleTimeout
+        configuration.timeoutIntervalForResource = overallTimeout
     }
 
     private static func check(_ response: HTTPURLResponse, maxBytes: Int64) throws {
