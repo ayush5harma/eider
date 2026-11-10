@@ -66,7 +66,7 @@ struct Output: Sendable {
         if json {
             line(ResultLine(ok: true, data: data, error: nil))
         } else {
-            let body = text()
+            let body = DisplayText.escapingControls(text())
             if !body.isEmpty { print(body) }
         }
         fflush(stdout)
@@ -142,8 +142,10 @@ private final class ProgressThrottle: @unchecked Sendable {
     }
 }
 
+/// Everything a person reads goes through here, so a control character from an IPA or a
+/// source (an ESC that starts a terminal sequence, a bidi override) is shown, not obeyed.
 func writeError(_ text: String) {
-    FileHandle.standardError.write(Data((text + "\n").utf8))
+    FileHandle.standardError.write(Data((DisplayText.escapingControls(text) + "\n").utf8))
 }
 
 /// Plain aligned columns: each column as wide as its longest cell.

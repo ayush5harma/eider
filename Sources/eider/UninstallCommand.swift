@@ -20,6 +20,8 @@ struct UninstallCommand: AsyncParsableCommand {
         let dataRemoved: Bool
     }
 
+    func validate() throws { try requireBundleID(bundleID) }
+
     func run() async throws {
         try await common.guarded { output in
             try await AppOperations().uninstall(bundleID: bundleID, removeData: removeData)

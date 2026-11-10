@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Downloads IPAs into `EiderPaths.downloads`, safely: through a `.part` file,
@@ -55,24 +56,29 @@ public actor DownloadManager {
         emit: @escaping @Sendable (DownloadEvent) -> Void
     ) async throws {
         let url = version.downloadURL
-        guard URLPolicy.isAllowed(url) else { throw DownloadFailure.blockedURL(url.absoluteString) }
+        // Loopback is allowed here because the callers vet it: AppOperations refuses a
+        // loopback address that does not come from a loopback source.
+        guard URLPolicy.isAllowed(url, allowLoopback: true) else { throw DownloadFailure.blockedURL(url.absoluteString) }
         try paths.ensure()
         let file = destination(app, version)
         guard inFlight.insert(file).inserted else { throw DownloadFailure.alreadyInProgress(file.lastPathComponent) }
         defer { inFlight.remove(file) }
 
         if try reuse(file, for: version, emit: emit) { return }
-        let part = file.appendingPathExtension("part")
+        let part = Self.partFile(for: file, url: url)
+        // Before the part was tied to its address, a leftover could be resumed from another one.
+        try? FileManager.default.removeItem(at: file.appendingPathExtension("part"))
         try await PartTransfer(transfer: transfer, maxBytes: maxBytes, emit: emit).run(url: url, part: part)
         let hash = try Hashing.sha256(ofFileAt: part)
         do {
             try verify(hash, of: version, allowChangedHash: allowChangedHash)
         } catch {
-            try? FileManager.default.removeItem(at: part)
+            PartTransfer.discard(part)
             throw error
         }
         try? FileManager.default.removeItem(at: file)
         try FileManager.default.moveItem(at: part, to: file)
+        PartTransfer.discard(part, keepingPart: true)
         emit(.finished(file: file, sha256: hash))
     }
 
@@ -114,6 +120,13 @@ public actor DownloadManager {
         }
         records[key] = hash
         try HashRecord.write(records, to: paths.hashesFile)
+    }
+
+    /// The partial file is named for the address it came from as well as the app and
+    /// version, so a leftover from one address is never resumed against another.
+    static func partFile(for file: URL, url: URL) -> URL {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+        return file.appendingPathExtension(digest).appendingPathExtension("part")
     }
 
     /// Bundle id and version come from the source, so they are reduced to a safe

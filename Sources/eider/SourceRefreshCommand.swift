@@ -44,7 +44,7 @@ struct SourceRefreshCommand: AsyncParsableCommand {
             }.joined(separator: "\n")
             if let failed = rows.first(where: { !$0.ok }), let report = failed.error {
                 if output.json { _ = output.fail(report, data: Payload(results: rows)) } else {
-                    print(text)
+                    print(DisplayText.escapingControls(text))
                     _ = output.fail(report)
                 }
                 throw ExitStatus.failure

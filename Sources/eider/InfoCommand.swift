@@ -16,6 +16,8 @@ struct InfoCommand: AsyncParsableCommand {
         let installed: InstalledApp?
     }
 
+    func validate() throws { try requireBundleID(bundleID) }
+
     func run() async throws {
         try await common.guarded { output in
             let operations = AppOperations()

@@ -18,7 +18,7 @@ public enum SourceFetcher {
     }
 
     static func fetch(_ url: URL, configuration: URLSessionConfiguration, maxBytes: Int64) async throws -> Data {
-        guard URLPolicy.isAllowed(url, allowFile: true) else {
+        guard URLPolicy.isAllowed(url, allowFile: true, allowLoopback: true) else {
             throw CatalogFailure.blockedURL(url.absoluteString)
         }
         if url.isFileURL { return try readFile(url, maxBytes: maxBytes) }

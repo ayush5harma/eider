@@ -24,6 +24,10 @@ public struct Uninstaller: Sendable {
     /// then attempted, and a refusal (macOS guards containers) is reported
     /// without bringing the app back.
     public func uninstall(bundleID: String, removeData: Bool = false) async throws {
+        // The id becomes a path below (the container), so it is checked before anything else.
+        guard BundleIdentifier.isValid(bundleID) else {
+            throw UninstallFailure(message: "\(bundleID) is not a valid bundle id (dot-separated letters, digits, - and _), so nothing was removed.")
+        }
         guard let app = try await store.app(bundleID: bundleID) else {
             throw UninstallFailure(message: "No installed app has the bundle id \(bundleID).")
         }
@@ -34,8 +38,6 @@ public struct Uninstaller: Sendable {
         }
         try await store.remove(bundleID: bundleID)
         guard removeData else { return }
-        // The id becomes a path below; it came from an IPA once, so check it again.
-        guard BundleIdentity.isPlausibleBundleID(bundleID) else { return }
         let container = containersDirectory.appendingPathComponent(bundleID, isDirectory: true)
         guard FileManager.default.fileExists(atPath: container.path) else { return }
         do { try Trash.move(container) } catch {

@@ -31,7 +31,9 @@ public actor LibraryStore {
 
     private func load() throws -> [InstalledApp] {
         guard let data = try? Data(contentsOf: file), !data.allSatisfy({ $0 == 0x20 || $0 == 0x0A }) else { return [] }
-        return try Self.decoder.decode([InstalledApp].self, from: data)
+        // An entry whose id is not a valid bundle id was not written by Eider; it is
+        // dropped on read, and the next save forgets it.
+        return try Self.decoder.decode([InstalledApp].self, from: data).filter { BundleIdentifier.isValid($0.bundleID) }
     }
 
     private func save(_ apps: [InstalledApp]) throws {

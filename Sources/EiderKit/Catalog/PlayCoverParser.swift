@@ -21,8 +21,8 @@ enum PlayCoverParser {
         return CatalogSource(
             url: context.sourceURL,
             format: .playCover,
-            name: wrapper.string("name") ?? context.fallbackName,
-            identifier: wrapper.string("id"),
+            name: wrapper.displayName("name") ?? context.fallbackName,
+            identifier: wrapper.displayName("id"),
             apps: apps,
             warnings: context.warnings,
             fetchedAt: now
@@ -30,17 +30,21 @@ enum PlayCoverParser {
     }
 
     private static func parseApp(_ item: JSONDict, index: Int, context: inout ParseContext) -> CatalogApp? {
-        let name = item.string("name")
+        let name = item.displayName("name") ?? (item.string("name") != nil ? item.string("bundleID", "bundleId") : nil)
         let label = "entry #\(index) (\(item.string("bundleID", "bundleId") ?? name ?? "unnamed"))"
         guard let bundleID = item.string("bundleID", "bundleId") else {
             context.warn("\(label): no bundle id, skipped")
+            return nil
+        }
+        guard BundleIdentifier.isValid(bundleID) else {
+            context.warn("\(label): not a valid bundle id, skipped")
             return nil
         }
         guard let name else {
             context.warn("\(label): no name, skipped")
             return nil
         }
-        guard let version = item.string("version") else {
+        guard let version = item.displayName("version") else {
             context.warn("\(label): no version, skipped")
             return nil
         }

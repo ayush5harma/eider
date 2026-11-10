@@ -36,23 +36,43 @@ struct InfoPlist {
 struct BundleIdentity {
     let executable: String
     let bundleID: String
+    /// What the IPA itself declares, before any override.
+    let shippedID: String
+    /// What the app shows as its name, cleaned.
+    let displayName: String
     /// The installed bundle is named after this.
     let name: String
     let minimumOS: String?
 
     /// Reverse-DNS and nothing else: the id becomes a path (the container) and an
-    /// IPA is untrusted, so "../../Documents" is refused before it is used.
-    static func isPlausibleBundleID(_ id: String) -> Bool {
-        !id.isEmpty && !id.contains("..") && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
-    }
+    /// IPA is untrusted, so "../../Documents" and "." are refused before use.
+    static func isPlausibleBundleID(_ id: String) -> Bool { BundleIdentifier.isValid(id) }
 
+    /// The executable is joined to the bundle path and handed to codesign, so it is a plain
+    /// file name: no slash, no control, NUL or format character.
     static func isPlausibleExecutableName(_ name: String) -> Bool {
-        !name.isEmpty && !name.contains("/") && name != "." && name != ".."
+        !name.isEmpty && name.utf8.count <= maxFileNameBytes && !name.contains("/") && name != "." && name != ".."
+            && !DisplayText.containsUnsafe(name)
     }
 
-    /// File-name safe: the installed bundle's path is built from it.
+    static let maxFileNameLength = 100
+    private static let maxFileNameBytes = 255
+
+    /// File-name safe: the installed bundle's path is built from it. Never empty,
+    /// never hidden (a leading dot), never long.
     static func fileSafe(_ name: String) -> String {
         String(name.map { "/:\n\r".contains($0) ? "_" : $0 })
+    }
+
+    /// The name of the installed bundle, from what the app shows. Falls back to the
+    /// bundle id when nothing usable is left.
+    static func bundleFileName(shown: String, bundleID: String) -> String {
+        func tidy(_ text: String) -> String {
+            String(fileSafe(DisplayText.sanitized(text)).drop { $0 == "." }.prefix(maxFileNameLength))
+                .trimmingCharacters(in: .whitespaces)
+        }
+        let name = tidy(shown)
+        return name.isEmpty ? tidy(bundleID) : name
     }
 
     init(plist: InfoPlist, options: InstallOptions) throws {
@@ -71,12 +91,15 @@ struct BundleIdentity {
         if let override = options.bundleID, !Self.isPlausibleBundleID(override) {
             throw InstallFailure(.invalidOption, "The bundle id \(override) is not a plain reverse-DNS name.")
         }
-        let shownName = options.displayName ?? plist.string("CFBundleDisplayName") ?? plist.string("CFBundleName") ?? executable
-        let name = Self.fileSafe(shownName).trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { throw InstallFailure(.invalidOption, "The display name is empty.") }
+        // The first candidate with anything visible left wins; the bundle id is the last resort.
+        let id = options.bundleID ?? shippedID
+        let candidates = [options.displayName, plist.string("CFBundleDisplayName"), plist.string("CFBundleName"), executable]
+        let shown = candidates.compactMap { $0 }.map(DisplayText.sanitized).first { !$0.isEmpty } ?? id
         self.executable = executable
-        bundleID = options.bundleID ?? shippedID
-        self.name = name
-        minimumOS = plist.string("MinimumOSVersion")
+        bundleID = id
+        self.shippedID = shippedID
+        displayName = shown
+        name = Self.bundleFileName(shown: shown, bundleID: id)
+        minimumOS = plist.string("MinimumOSVersion").map(DisplayText.sanitized).flatMap { $0.isEmpty ? nil : $0 }
     }
 }

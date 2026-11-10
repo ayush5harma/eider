@@ -57,10 +57,10 @@ cat >"$W/site/source.json" <<'JSON'
 {"name":"Smoke Source","apps":[
  {"name":"IPA Probe","bundleIdentifier":"local.ipa-install-on-mac.probe","developerName":"Eider tests",
   "localizedDescription":"A tiny app used to test the installer.",
-  "versions":[{"version":"2.0","buildVersion":"2","downloadURL":"http://127.0.0.1:9/probe-2.ipa","date":"2026-11-01"},
-              {"version":"1.0","buildVersion":"1","downloadURL":"http://127.0.0.1:9/probe-1.ipa"}]},
+  "versions":[{"version":"2.0","buildVersion":"2","downloadURL":"https://example.invalid/probe-2.ipa","date":"2026-11-01"},
+              {"version":"1.0","buildVersion":"1","downloadURL":"https://example.invalid/probe-1.ipa"}]},
  {"name":"Another App","bundleIdentifier":"com.example.another","developerName":"Someone",
-  "versions":[{"version":"1.0","downloadURL":"http://127.0.0.1:9/another.ipa"}]}]}
+  "versions":[{"version":"1.0","downloadURL":"https://example.invalid/another.ipa"}]}]}
 JSON
 CLI="$APP/Contents/Resources/cli/bin/eider"
 eider() { env EIDER_HOME="$W/home" "$CLI" "$@"; }

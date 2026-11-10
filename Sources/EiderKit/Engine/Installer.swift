@@ -39,7 +39,9 @@ public struct Installer: Sendable {
         options: InstallOptions = InstallOptions(),
         onEvent: @escaping @Sendable (InstallEvent) -> Void = { _ in }
     ) async throws -> InstalledApp {
-        let run = InstallRun(ipa: ipa, options: options, shims: shims, extractor: extractor, reset: reset, onEvent: onEvent)
+        // What Eider installed before, so the last stage knows which bundles at the destination are its own.
+        let recorded = (try? await store.all()) ?? []
+        let run = InstallRun(ipa: ipa, options: options, shims: shims, extractor: extractor, reset: reset, recorded: recorded, onEvent: onEvent)
         let app: InstalledApp = try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do { continuation.resume(returning: try run.execute()) } catch { continuation.resume(throwing: error) }

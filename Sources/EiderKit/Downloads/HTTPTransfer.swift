@@ -97,7 +97,10 @@ final class HTTPTransfer: NSObject, URLSessionDataDelegate, @unchecked Sendable 
         _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        if let target = request.url, URLPolicy.isAllowed(target) {
+        // Loopback is followed only from a request that was itself to loopback: an
+        // https address must not be able to bounce this Mac into its own services.
+        let startedOnLoopback = task.originalRequest?.url.map(URLPolicy.isLoopbackURL) ?? false
+        if let target = request.url, URLPolicy.isAllowed(target, allowLoopback: startedOnLoopback) {
             completionHandler(request)
             return
         }

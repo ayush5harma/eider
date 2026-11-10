@@ -25,6 +25,7 @@ struct DataReset: Sendable {
 
     /// Returns a line to report, or nil when there was no container.
     func clear(bundleID: String) -> String? {
+        guard BundleIdentifier.isValid(bundleID) else { return nil }
         let container = containersDirectory.appendingPathComponent(bundleID, isDirectory: true)
             .appendingPathComponent("Data", isDirectory: true)
         var isDirectory: ObjCBool = false

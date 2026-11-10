@@ -155,12 +155,14 @@ final class CatalogURLPolicyTests: XCTestCase {
         XCTAssertFalse(allowed("data:text/plain,hi"))
     }
 
-    func testHTTPToLoopbackIsAllowed() {
-        XCTAssertTrue(allowed("http://localhost:8080/a"))
-        XCTAssertTrue(allowed("http://127.0.0.1/a"))
-        XCTAssertTrue(allowed("http://[::1]:9/a"))
-        XCTAssertFalse(allowed("http://127.0.0.1.example.com/a"))
-        XCTAssertFalse(allowed("http://localhost.example.com/a"))
+    func testHTTPToLoopbackIsAllowedOnlyWhenAskedFor() {
+        let loopback = { (text: String) in URL(string: text).map { URLPolicy.isAllowed($0, allowLoopback: true) } ?? false }
+        XCTAssertFalse(allowed("http://localhost:8080/a"))
+        XCTAssertTrue(loopback("http://localhost:8080/a"))
+        XCTAssertTrue(loopback("http://127.0.0.1/a"))
+        XCTAssertTrue(loopback("http://[::1]:9/a"))
+        XCTAssertFalse(loopback("http://127.0.0.1.example.com/a"))
+        XCTAssertFalse(loopback("http://localhost.example.com/a"))
     }
 
     func testFileURLsNeedTheFlag() {

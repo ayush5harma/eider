@@ -19,10 +19,10 @@ enum AltStoreParser {
         return CatalogSource(
             url: context.sourceURL,
             format: .altStore,
-            name: root.string("name") ?? context.fallbackName,
-            identifier: root.string("identifier"),
-            subtitle: root.string("subtitle"),
-            description: root.string("description"),
+            name: root.displayName("name") ?? context.fallbackName,
+            identifier: root.displayName("identifier"),
+            subtitle: root.displayName("subtitle"),
+            description: root.prose("description"),
             iconURL: context.url(root.string("iconURL")),
             headerURL: context.url(root.string("headerURL")),
             website: context.url(root.string("website")),
@@ -37,11 +37,17 @@ enum AltStoreParser {
     // MARK: Apps
 
     private static func parseApp(_ item: JSONDict, index: Int, context: inout ParseContext) -> CatalogApp? {
-        let name = item.string("name")
+        // A name that is nothing but invisible characters is still a name the source gave:
+        // the app is listed under its bundle id rather than skipped.
         let bundleID = item.string("bundleIdentifier")
+        let name = item.displayName("name") ?? (item.string("name") != nil ? bundleID : nil)
         let label = "app #\(index) (\(bundleID ?? name ?? "unnamed"))"
         guard let bundleID else {
             context.warn("\(label): no bundle identifier, skipped")
+            return nil
+        }
+        guard BundleIdentifier.isValid(bundleID) else {
+            context.warn("\(label): not a valid bundle identifier, skipped")
             return nil
         }
         guard let name else {
@@ -56,12 +62,12 @@ enum AltStoreParser {
         return CatalogApp(
             bundleID: bundleID,
             name: name,
-            developerName: item.string("developerName"),
-            subtitle: item.string("subtitle"),
-            description: item.string("localizedDescription"),
+            developerName: item.displayName("developerName"),
+            subtitle: item.displayName("subtitle"),
+            description: item.prose("localizedDescription"),
             iconURL: context.url(item.string("iconURL")),
             tintColor: item.string("tintColor"),
-            category: item.string("category"),
+            category: item.displayName("category"),
             screenshots: screenshots(of: item, context: context),
             versions: versions
         )
@@ -86,7 +92,7 @@ enum AltStoreParser {
         _ entry: JSONDict, flat: Bool, label: String, context: inout ParseContext
     ) -> CatalogVersion? {
         guard let download = context.downloadURL(entry.string("downloadURL"), label: label) else { return nil }
-        guard let number = entry.string("version", "marketingVersion") else {
+        guard let number = entry.displayName("version", "marketingVersion") else {
             context.warn("\(label): no version number, skipped")
             return nil
         }
@@ -97,13 +103,13 @@ enum AltStoreParser {
         }
         return CatalogVersion(
             version: number,
-            build: entry.string("buildVersion"),
+            build: entry.displayName("buildVersion"),
             date: context.dates.parse(flat ? entry["versionDate"] : entry["date"]),
-            notes: flat ? entry.string("versionDescription") : entry.string("localizedDescription"),
+            notes: flat ? entry.prose("versionDescription") : entry.prose("localizedDescription"),
             downloadURL: download,
             size: entry.int64("size").flatMap { $0 > 0 ? $0 : nil },
-            minOSVersion: entry.string("minOSVersion"),
-            maxOSVersion: entry.string("maxOSVersion"),
+            minOSVersion: entry.displayName("minOSVersion"),
+            maxOSVersion: entry.displayName("maxOSVersion"),
             sha256: sha256
         )
     }
@@ -154,7 +160,7 @@ enum AltStoreParser {
         var news: [CatalogNews] = []
         for (index, element) in list.enumerated() {
             guard let item = element as? JSONDict,
-                  let identifier = item.string("identifier"), let title = item.string("title")
+                  let identifier = item.displayName("identifier"), let title = item.displayName("title")
             else {
                 context.warn("news #\(index + 1): needs an identifier and a title, skipped")
                 continue
@@ -162,7 +168,7 @@ enum AltStoreParser {
             news.append(CatalogNews(
                 identifier: identifier,
                 title: title,
-                caption: item.string("caption"),
+                caption: item.prose("caption"),
                 date: context.dates.parse(item["date"]),
                 url: context.url(item.string("url")),
                 imageURL: context.url(item.string("imageURL")),
