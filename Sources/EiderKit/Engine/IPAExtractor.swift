@@ -79,16 +79,116 @@ struct IPAExtractor {
 
     // MARK: Extract
 
+    /// A symlink as the archive declares it, with the target already read and vetted.
+    private struct Link {
+        let path: String
+        let target: String
+    }
+
     /// Unpack into `directory` (new and empty) and return the single `.app` under Payload.
+    ///
+    /// Symlinks are never handed to unzip: the archive is extracted without them and
+    /// each is created here afterwards, only when its target is relative and has no
+    /// ".." component. With no link on disk while files are written, nothing can be
+    /// written through one, whatever the spelling of the entry's name (case variants
+    /// on a case-insensitive volume, "./", doubled slashes). The size cap is enforced
+    /// on the bytes written, because the central directory is attacker-controlled.
     func extract(_ ipa: URL, into directory: URL) throws -> URL {
-        try validate(try list(ipa))
+        let entries = try list(ipa)
+        try validate(entries)
+        let links = try entries.filter(\.isSymlink).map { Link(path: $0.path, target: try linkTarget(of: $0, in: ipa)) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let result = try ProcessRunner.run(Self.unzip, ["-q", "-o", ipa.path, "-d", directory.path])
+        try unpack(ipa, into: directory, leavingOut: links.map(\.path))
+        try createSymlinks(links, in: directory)
+        try rejectEscapingSymlinks(in: directory)
+        return try appBundle(in: directory)
+    }
+
+    private func unpack(_ ipa: URL, into directory: URL, leavingOut excluded: [String]) throws {
+        var arguments = ["-q", "-o", "-d", directory.path, ipa.path]
+        if !excluded.isEmpty { arguments += ["-x"] + excluded.map(Self.literalPattern) }
+        let cap = maxUncompressedBytes
+        let result: ProcessResult
+        do {
+            result = try ProcessRunner.run(Self.unzip, arguments, stopWhen: { Self.bytesWritten(under: directory) > cap })
+        } catch {
+            throw InstallFailure(.extractionFailed, "Could not run /usr/bin/unzip: \(error)")
+        }
+        if result.stopped || Self.bytesWritten(under: directory) > cap {
+            try? FileManager.default.removeItem(at: directory)
+            throw InstallFailure(
+                .tooLarge,
+                "The archive unpacked to more than the \(Self.gigabytes(cap)) GB limit (its own size fields said less). Unpacking was stopped and what was written was removed."
+            )
+        }
         guard result.succeeded else {
             throw InstallFailure(.extractionFailed, "Unpacking \(ipa.lastPathComponent) failed: \(result.errorLine)")
         }
-        try rejectEscapingSymlinks(in: directory)
-        return try appBundle(in: directory)
+    }
+
+    private static func gigabytes(_ bytes: UInt64) -> String { String(format: "%.1f", Double(bytes) / Double(1 << 30)) }
+
+    /// Total size of the regular files below `directory`, as the file system reports it now.
+    static func bytesWritten(under directory: URL) -> UInt64 {
+        let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
+        guard let walker = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys) else { return 0 }
+        var total: UInt64 = 0
+        for case let item as URL in walker {
+            guard let values = try? item.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { continue }
+            total &+= UInt64(values.fileSize ?? 0)
+        }
+        return total
+    }
+
+    /// unzip treats names on its command line as wildcard patterns.
+    static func literalPattern(_ name: String) -> String {
+        var escaped = ""
+        for character in name {
+            if "\\*?[]".contains(character) { escaped.append("\\") }
+            escaped.append(character)
+        }
+        return escaped
+    }
+
+    // MARK: Symlinks
+
+    private static let maxLinkTargetBytes = 1024
+
+    /// Reads a symlink entry's target (its stored data) and refuses anything that is not
+    /// a relative path without a ".." component.
+    private func linkTarget(of entry: Entry, in ipa: URL) throws -> String {
+        func refuse(_ why: String) -> InstallFailure {
+            InstallFailure(.unsafeArchive, "The archive contains a symlink \(why) (\(entry.path)). It was not unpacked.")
+        }
+        guard entry.path.hasPrefix("Payload/"), !entry.path.hasSuffix("/") else { throw refuse("outside Payload") }
+        guard entry.size > 0, entry.size <= UInt64(Self.maxLinkTargetBytes) else { throw refuse("with an unreasonable target") }
+        let result = try ProcessRunner.run(Self.unzip, ["-p", ipa.path, Self.literalPattern(entry.path)])
+        guard result.succeeded, UInt64(result.standardOutput.count) == entry.size,
+              let target = String(data: result.standardOutput, encoding: .utf8),
+              !target.isEmpty, !target.hasPrefix("/"), !target.utf8.contains(0)
+        else { throw refuse("with an absolute or unreadable target") }
+        guard !target.split(separator: "/", omittingEmptySubsequences: false).contains("..") else {
+            throw refuse("that points to a parent directory (\(target))")
+        }
+        return target
+    }
+
+    private func createSymlinks(_ links: [Link], in directory: URL) throws {
+        let root = Self.resolvedPath(directory)
+        for link in links {
+            let location = directory.appendingPathComponent(link.path)
+            let parent = location.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+            let resolvedParent = Self.resolvedPath(parent)
+            // attributesOfItem does not follow a final symlink, and on a case-insensitive
+            // volume it finds an extracted entry that differs from the link's name only in case.
+            guard resolvedParent == root || resolvedParent.hasPrefix(root + "/"),
+                  (try? FileManager.default.attributesOfItem(atPath: location.path)) == nil
+            else { throw InstallFailure(.unsafeArchive, "The archive's symlink \(link.path) collides with another entry or sits below a link. It was not unpacked.") }
+            do { try FileManager.default.createSymbolicLink(atPath: location.path, withDestinationPath: link.target) } catch {
+                throw InstallFailure(.extractionFailed, "Could not create the symlink \(link.path): \(error.localizedDescription)")
+            }
+        }
     }
 
     func appBundle(in directory: URL) throws -> URL {

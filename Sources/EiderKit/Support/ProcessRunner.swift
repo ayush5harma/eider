@@ -4,8 +4,17 @@ public struct ProcessResult: Sendable {
     public let status: Int32
     public let standardOutput: Data
     public let standardError: Data
+    /// True when the caller's `stopWhen` check ended the program early.
+    public let stopped: Bool
 
-    public var succeeded: Bool { status == 0 }
+    init(status: Int32, standardOutput: Data, standardError: Data, stopped: Bool = false) {
+        self.status = status
+        self.standardOutput = standardOutput
+        self.standardError = standardError
+        self.stopped = stopped
+    }
+
+    public var succeeded: Bool { status == 0 && !stopped }
     public var output: String { String(decoding: standardOutput, as: UTF8.self) }
     /// Standard error on one line, so a tool's multi-line complaint reads as one sentence.
     public var errorLine: String {
@@ -27,10 +36,16 @@ public struct ProcessLaunchError: Error, CustomStringConvertible {
 /// architecture allows on the install path go through here (codesign, unzip,
 /// lsregister, open); callers pass absolute paths, never a lookup through PATH.
 public enum ProcessRunner {
+    /// `stopWhen`, when given, is asked every `pollEvery` seconds while the program
+    /// runs; a true answer terminates it and sets `stopped` on the result. It is how
+    /// a limit is enforced on what a program actually does rather than on what it
+    /// was told it would do.
     public static func run(
         _ executable: String,
         _ arguments: [String] = [],
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        pollEvery interval: TimeInterval = 0.1,
+        stopWhen: (@Sendable () -> Bool)? = nil
     ) throws -> ProcessResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -42,6 +57,19 @@ public enum ProcessRunner {
         process.standardInput = FileHandle.nullDevice
         do { try process.run() } catch {
             throw ProcessLaunchError(executable: executable, reason: error.localizedDescription)
+        }
+        let stopBox = FlagBox()
+        if let stopWhen {
+            DispatchQueue.global().async {
+                while process.isRunning {
+                    Thread.sleep(forTimeInterval: interval)
+                    if process.isRunning, stopWhen() {
+                        stopBox.set()
+                        process.terminate()
+                        return
+                    }
+                }
+            }
         }
         // Both pipes are drained at once: a program that fills one while this
         // waits on the other would block forever.
@@ -55,7 +83,7 @@ public enum ProcessRunner {
         let outputData = (try? output.fileHandleForReading.readToEnd()) ?? Data()
         drained.wait()
         process.waitUntilExit()
-        return ProcessResult(status: process.terminationStatus, standardOutput: outputData, standardError: errorBox.data)
+        return ProcessResult(status: process.terminationStatus, standardOutput: outputData, standardError: errorBox.data, stopped: stopBox.value)
     }
 
     public static func runAsync(
@@ -75,4 +103,11 @@ public enum ProcessRunner {
 
 private final class DataBox: @unchecked Sendable {
     var data = Data()
+}
+
+private final class FlagBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.withLock { flag } }
+    func set() { lock.withLock { flag = true } }
 }
