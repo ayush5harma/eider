@@ -57,7 +57,16 @@ public actor SourceStore {
     /// Fetches every source at once. One failure does not stop the others, and
     /// a failed source keeps its previous copy.
     public func refreshAll() async throws -> [SourceRefreshResult] {
-        let urls = try current().map(\.url)
+        try await refresh(urls: try current().map(\.url))
+    }
+
+    /// Fetches the given sources at once (the app's launch check refreshes only
+    /// the stale ones). An address not in the list is skipped; one failure does
+    /// not stop the others, and a failed source keeps its previous copy.
+    public func refresh(urls requested: [URL]) async throws -> [SourceRefreshResult] {
+        let added = Set(try current().map(\.url))
+        let urls = requested.filter { added.contains($0) }
+        guard !urls.isEmpty else { return [] }
         let fetch = self.fetch
         let outcomes = await withTaskGroup(of: (URL, Result<CatalogSource, Error>).self) { group in
             for url in urls {

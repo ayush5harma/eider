@@ -36,7 +36,7 @@ public enum InstallStatus: Equatable, Sendable {
 }
 
 public enum SidebarSection: String, CaseIterable, Identifiable, Sendable {
-    case library, browse, activity, sources
+    case library, updates, browse, activity, sources
     public var id: String { rawValue }
     public var title: String { rawValue.capitalized }
 }

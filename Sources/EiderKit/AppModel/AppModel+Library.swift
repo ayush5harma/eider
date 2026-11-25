@@ -7,9 +7,33 @@ extension AppModel {
         updates[app.bundleID] != nil
     }
 
-    public func update(_ app: InstalledApp) {
+    /// From Library the person is taken to Activity; the Updates page shows
+    /// the progress in the row instead and stays where it is.
+    public func update(_ app: InstalledApp, showActivity: Bool = true) {
+        guard !isUpdating(app.bundleID) else { return }
         activity.start(.update(bundleID: app.bundleID, name: app.name))
-        selection = .activity
+        if showActivity { selection = .activity }
+    }
+
+    /// Every update, one after another, through Activity.
+    public func updateAll() {
+        let requests = updateList
+            .filter { !isUpdating($0.installed.bundleID) }
+            .map { InstallRequest.update(bundleID: $0.installed.bundleID, name: $0.installed.name) }
+        guard !requests.isEmpty else { return }
+        activity.startInSequence(requests)
+    }
+
+    /// The running or queued update of this app, if any.
+    public func updateActivity(for bundleID: String) -> ActivityItem? {
+        activity.items.first {
+            guard $0.isPending, case .update(let id, _) = $0.request else { return false }
+            return id == bundleID
+        }
+    }
+
+    public func isUpdating(_ bundleID: String) -> Bool {
+        updateActivity(for: bundleID) != nil
     }
 
     public func uninstall(_ app: InstalledApp, removeData: Bool) async {
