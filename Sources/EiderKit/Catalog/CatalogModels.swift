@@ -108,14 +108,19 @@ public struct CatalogSource: Codable, Sendable, Hashable {
     /// One line per entry skipped or value ignored while parsing.
     public var warnings: [String]
     public var fetchedAt: Date
+    /// How many app entries the document listed, set only when entries sharing a
+    /// bundle id were merged into one app (so `apps.count` is smaller); nil when
+    /// nothing was merged or the copy predates merging.
+    public var entryCount: Int?
 
     public init(
         url: URL, format: SourceFormat, name: String, identifier: String? = nil,
         subtitle: String? = nil, description: String? = nil, iconURL: URL? = nil,
         headerURL: URL? = nil, website: URL? = nil, tintColor: String? = nil,
         apps: [CatalogApp] = [], news: [CatalogNews] = [], warnings: [String] = [],
-        fetchedAt: Date = Date()
+        fetchedAt: Date = Date(), entryCount: Int? = nil
     ) {
+        self.entryCount = entryCount
         self.url = url
         self.format = format
         self.name = name
@@ -144,9 +149,16 @@ public struct SourcedApp: Sendable, Hashable {
 
     public var sourceURL: URL { source.url }
 
+    /// Unique within one source once its entries are merged (`CatalogMerge`); a
+    /// catalog built from several sources makes it unique across them with
+    /// `init(source:app:id:)` should two ever collide.
     public init(source: CatalogSource, app: CatalogApp) {
+        self.init(source: source, app: app, id: "\(source.url.absoluteString)|\(app.bundleID)")
+    }
+
+    init(source: CatalogSource, app: CatalogApp, id: String) {
         self.source = source
         self.app = app
-        self.id = "\(source.url.absoluteString)|\(app.bundleID)"
+        self.id = id
     }
 }

@@ -13,9 +13,13 @@ struct SourceAddCommand: AsyncParsableCommand {
         try await common.guarded { output in
             let source = try await AppOperations().sources.add(url: try sourceURL(from: url))
             let warnings = source.warnings.map { "warning: \($0)" }
+            var lines = ["Added \(source.name): \(source.apps.count) app(s)"]
+            if let entries = source.entryCount {
+                lines.append("\(entries) entries listed; those sharing a bundle id were merged into one app each.")
+            }
             output.result(
                 SourceSummary(source),
-                text: (["Added \(source.name): \(source.apps.count) app(s)"] + warnings).joined(separator: "\n"))
+                text: (lines + warnings).joined(separator: "\n"))
         }
     }
 }
