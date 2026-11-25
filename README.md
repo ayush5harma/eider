@@ -143,8 +143,8 @@ swift test
 Scripts/build-shims.sh      # compile the shims into build/shims
 Scripts/engine-e2e.sh       # install engine, judged by effect, 26 checks
 Scripts/e2e.sh              # source, install, update, doctor, uninstall;
-                            # EIDER_E2E_CRASH_CHECKS=1 adds the broken-install
-                            # checks, which open a crash window per launch
+                            # EIDER_E2E_CRASH_CHECKS=1 adds the crash
+                            # checks (missing library, throwing tweak), one crash window each
 Scripts/make-app.sh         # assemble and ad hoc sign build/Eider.app
 ```
 
