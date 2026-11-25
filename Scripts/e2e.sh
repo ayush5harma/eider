@@ -16,7 +16,15 @@
 # container is emptied (its root belongs to containermanagerd) and only the
 # Trash entries the run itself created are deleted again.
 #
-# Usage: Scripts/e2e.sh
+# The broken-install checks crash the probe on purpose (dyld cannot load
+# ProbeKit), and macOS opens a "quit unexpectedly" / Problem Report window for
+# every such crash: two per run, on the screen of whoever is using the Mac
+# (eight in one evening of agent runs, 2026-11-25). They are skipped unless
+# EIDER_E2E_CRASH_CHECKS=1. Either way the probe's crash reports from the run
+# are deleted again.
+#
+# Usage: Scripts/e2e.sh                             (crash checks skipped)
+#        EIDER_E2E_CRASH_CHECKS=1 Scripts/e2e.sh    (all checks)
 
 set -uo pipefail
 
@@ -28,12 +36,15 @@ LOG="$CONTAINER/Documents/probe.log"
 W=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/eider-e2e-product.XXXXXX")" && pwd -P)
 APP="$W/apps/IPA Probe.app"
 SITE="$W/site"
-PASS=0; FAIL=0; MARK=""; SERVER_PID=""
+PASS=0; FAIL=0; SKIP=0; MARK=""; SERVER_PID=""
+# Crash reports newer than this file and carrying the probe's bundle id are the run's own.
+touch "$W/run.start"
 
 ok()    { echo "  PASS  $*"; PASS=$((PASS + 1)); }
 bad()   { echo "  FAIL  $*"; FAIL=$((FAIL + 1)); }
+skip()  { echo "  SKIP  $*"; SKIP=$((SKIP + 1)); }
 check() { local what="$1"; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
-fatal() { bad "$*"; echo "$PASS passed, $FAIL failed"; exit 1; }
+fatal() { bad "$*"; echo "$PASS passed, $FAIL failed, $SKIP skipped"; exit 1; }
 
 # ~/.Trash entries that exist before the run, so only the run's own are removed.
 TRASH_BEFORE="$W/trash.before"
@@ -58,10 +69,20 @@ clean_trash() {
   done
   return 0
 }
+# dyld writes its report within the second of the crash (measured 2026-11-25),
+# so by cleanup time every report this run caused is on disk.
+clean_crash_reports() {
+  local f
+  for f in "$HOME/Library/Logs/DiagnosticReports"/Probe-*.ips; do
+    [ -f "$f" ] && [ "$f" -nt "$W/run.start" ] || continue
+    head -n 1 "$f" | grep -qF "\"bundleID\":\"$BID\"" && rm -f "$f"
+  done
+  return 0
+}
 cleanup() {
   quit_probe
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null
-  empty_container; clean_trash; rm -rf "$W"
+  empty_container; clean_trash; clean_crash_reports; rm -rf "$W"
 }
 trap cleanup EXIT
 
@@ -205,15 +226,26 @@ echo "doctor"
 run_json doctor "$BID"
 check "doctor on a healthy install exits 0 and reports it running" test "$RC" = 0 -a "$(jget data.running)" = true
 quit_probe
-rm -rf "$APP/Frameworks/ProbeKit.framework"
-run_json doctor "$BID" --timeout 15
-check "doctor on the broken install exits 2" test "$RC" = 2
-check "the diagnosis is a missing library" is data.diagnosis.code library_not_loaded
-check "the error carries the same code with a launch. prefix" is error.code launch.library_not_loaded
-check "the evidence names the framework" grep -q 'ProbeKit' "$W/last.json"
-eider doctor "$BID" --timeout 15 >"$W/out" 2>"$W/err"
-check "the text report prints the sentence and the code on stderr" grep -q '(launch.library_not_loaded)' "$W/err"
-quit_probe
+BROKEN_CHECKS=(
+  "doctor on the broken install exits 2"
+  "the diagnosis is a missing library"
+  "the error carries the same code with a launch. prefix"
+  "the evidence names the framework"
+  "the text report prints the sentence and the code on stderr"
+)
+if [ "${EIDER_E2E_CRASH_CHECKS:-0}" = 1 ]; then
+  rm -rf "$APP/Frameworks/ProbeKit.framework"
+  run_json doctor "$BID" --timeout 15
+  check "${BROKEN_CHECKS[0]}" test "$RC" = 2
+  check "${BROKEN_CHECKS[1]}" is data.diagnosis.code library_not_loaded
+  check "${BROKEN_CHECKS[2]}" is error.code launch.library_not_loaded
+  check "${BROKEN_CHECKS[3]}" grep -q 'ProbeKit' "$W/last.json"
+  eider doctor "$BID" --timeout 15 >"$W/out" 2>"$W/err"
+  check "${BROKEN_CHECKS[4]}" grep -q '(launch.library_not_loaded)' "$W/err"
+  quit_probe
+else
+  for name in "${BROKEN_CHECKS[@]}"; do skip "$name (crashes the probe; EIDER_E2E_CRASH_CHECKS=1 runs it)"; done
+fi
 
 # ── failures and usage ──────────────────────────────────────────────────────
 echo "exit codes"
@@ -235,5 +267,5 @@ check "a second uninstall fails: nothing to remove" test "$RC" = 2
 run_json source remove "$BASE/source.json"
 check "source remove succeeds" test "$RC" = 0
 
-echo "$PASS passed, $FAIL failed"
+echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" -eq 0 ]
