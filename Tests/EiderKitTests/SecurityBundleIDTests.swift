@@ -14,7 +14,9 @@ final class SecurityBundleIDTests: XCTestCase {
         }
     }
 
-    func testCatalogSkipsAnInvalidBundleIDWithAWarning() throws {
+    /// A source's id is a label (CatalogIdentifier): "." is listed, and the strict check
+    /// applies where an id becomes a path (SecurityCatalogIDTests follows it there).
+    func testCatalogListsAnIDTheStrictCheckRefusesWithoutAWarning() throws {
         let altStore = Data(#"""
         {"name":"S","apps":[
           {"name":"Dot","bundleIdentifier":".","versions":[{"version":"1","downloadURL":"https://example.com/a.ipa"}]},
@@ -22,16 +24,16 @@ final class SecurityBundleIDTests: XCTestCase {
         ]}
         """#.utf8)
         let source = try SourceParser.parse(data: altStore, from: CatalogFixtures.sourceURL)
-        XCTAssertEqual(source.apps.map(\.bundleID), ["com.ok.app"])
-        XCTAssertTrue(source.warnings.contains { $0.contains("bundle") }, "\(source.warnings)")
+        XCTAssertEqual(source.apps.map(\.bundleID), [".", "com.ok.app"])
+        XCTAssertEqual(source.warnings, [])
 
         let playCover = Data(#"""
-        [{"bundleID":"..","name":"Bad","version":"1","link":"https://example.com/a.ipa"},
+        [{"bundleID":"..","name":"Odd","version":"1","link":"https://example.com/a.ipa"},
          {"bundleID":"com.ok.app","name":"Ok","version":"1","link":"https://example.com/b.ipa"}]
         """#.utf8)
         let pc = try SourceParser.parse(data: playCover, from: CatalogFixtures.sourceURL)
-        XCTAssertEqual(pc.apps.map(\.bundleID), ["com.ok.app"])
-        XCTAssertTrue(pc.warnings.contains { $0.contains("bundle") }, "\(pc.warnings)")
+        XCTAssertEqual(pc.apps.map(\.bundleID), ["..", "com.ok.app"])
+        XCTAssertEqual(pc.warnings, [])
     }
 
     func testLibraryIgnoresAnInvalidEntryReadBack() async throws {

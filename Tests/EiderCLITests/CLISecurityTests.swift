@@ -62,4 +62,17 @@ final class CLISecurityTests: XCTestCase {
             XCTAssertThrowsError(try requireBundleID(bad), bad)
         }
     }
+
+    /// `info` only looks an id up, so it takes what a source may list; the commands
+    /// whose id becomes a path (uninstall, open, doctor, update) stay strict.
+    func testInfoTakesASourcesOwnIDAndPathCommandsDoNot() {
+        for listed in ["cypwn.AppCake+.7.2.2", "sh.ppy.osu!lazer", "com.unknown.", "../x"] {
+            XCTAssertNoThrow(try InfoCommand.parse([listed]), listed)
+            XCTAssertThrowsError(try UninstallCommand.parse([listed]), listed)
+            XCTAssertThrowsError(try OpenCommand.parse([listed]), listed)
+        }
+        for bad in ["", "a\u{1B}[2Jb", String(repeating: "a", count: 256)] {
+            XCTAssertThrowsError(try InfoCommand.parse([bad]), bad.debugDescription)
+        }
+    }
 }

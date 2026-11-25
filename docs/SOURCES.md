@@ -23,6 +23,11 @@ Older sources put `version`, `versionDate`, `versionDescription`,
 `downloadURL` and `size` directly on the app. Eider reads that flat form when
 an app has no usable `versions`.
 
+Dates are read fastest as `2026-01-15` (midnight UTC) or
+`2026-01-15T09:30:00Z` (`.123` milliseconds and a `+05:30` offset are fine).
+A zone-less timestamp, a space instead of the `T` or a `+0530` offset are
+accepted too, just more slowly.
+
 ```json
 {
   "name": "Example Source",
@@ -87,9 +92,21 @@ you can; it is the only integrity check a source can offer.
 - Redirects are held to the same rules.
 
 An entry whose download URL breaks these rules is skipped with a warning; the
-rest of the source still loads. An entry whose bundle id is not a plain
-reverse-DNS name (dot-separated letters, digits, `-` and `_`) is skipped the
-same way.
+rest of the source still loads.
+
+## Bundle ids
+
+A source's `bundleIdentifier` (or `bundleID`) is the name Eider lists the app
+under and matches updates by. Any text is accepted: control and invisible
+characters are removed, and an entry with an id longer than 255 bytes is
+skipped with a warning. Use the id the IPA itself ships, though. Eider installs
+the app under the IPA's own `CFBundleIdentifier` and refuses an IPA whose id
+differs from the one the source lists, so an id the IPA does not carry (for
+example `cypwn.AppCake+.7.2.2`) installs only when the owner passes that IPA's
+id with `--bundle-id` (the Bundle id field in the app). On the command line,
+`eider install <id>` reads anything with a `/`, a URL scheme or an `.ipa`
+ending as a file or an address, so an entry whose id looks like one installs
+from the app only.
 
 ## What makes an IPA installable
 

@@ -179,6 +179,73 @@ final class CatalogStoreTests: XCTestCase {
         XCTAssertEqual(apps.map(\.sourceURL), [urlA, urlB, urlB])
     }
 
+    /// The file is rewritten whole on every change, and a 17k-app source made the
+    /// indented, key-sorted form 22 MB: it is written compact now.
+    func testTheFileIsWrittenCompact() async throws {
+        let paths = try CatalogFixtures.temporaryHome()
+        let fake = FakeFetch()
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A"), ("com.b", "App B")]))
+        _ = try await SourceStore(paths: paths, fetch: fake.fetch).add(url: urlA)
+        let text = try String(contentsOf: paths.sourcesFile, encoding: .utf8)
+        XCTAssertFalse(text.contains("\n"), "no line breaks")
+        XCTAssertFalse(text.contains("\": "), "no space after a key")
+    }
+
+    /// Files written before the change were pretty-printed with sorted keys; they
+    /// must still load, exactly.
+    func testAnOldPrettyPrintedFileStillLoads() async throws {
+        struct OldFile: Encodable {
+            var version = 1
+            var sources: [CatalogSource]
+        }
+        let paths = try CatalogFixtures.temporaryHome()
+        let fake = FakeFetch()
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A")]))
+        let saved = try await SourceStore(paths: paths, fetch: fake.fetch).add(url: urlA)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        try encoder.encode(OldFile(sources: [saved])).write(to: paths.sourcesFile)
+        XCTAssertTrue(try String(contentsOf: paths.sourcesFile, encoding: .utf8).contains("\n  "), "the fixture really is the old form")
+
+        let reloaded = try await SourceStore(paths: paths, fetch: fake.fetch).sources
+        XCTAssertEqual(reloaded, [saved])
+    }
+
+    /// `allApps()` is kept between calls; every change to the list must show in
+    /// the next call.
+    func testAllAppsFollowsEveryChange() async throws {
+        let fake = FakeFetch()
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A")]))
+        fake.set(urlB, json: altStore(name: "B", apps: [("com.b", "App B")]))
+        let store = SourceStore(paths: try CatalogFixtures.temporaryHome(), fetch: fake.fetch)
+        func ids() async throws -> [String] { try await store.allApps().map(\.app.bundleID) }
+
+        let empty = try await ids()
+        XCTAssertEqual(empty, [])
+        _ = try await store.add(url: urlA)
+        let afterAdd = try await ids()
+        XCTAssertEqual(afterAdd, ["com.a"])
+        _ = try await store.add(url: urlB)
+        let afterSecond = try await ids()
+        XCTAssertEqual(afterSecond, ["com.a", "com.b"])
+
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A"), ("com.a2", "App A2")]))
+        _ = try await store.refresh(url: urlA)
+        let afterRefresh = try await ids()
+        XCTAssertEqual(afterRefresh, ["com.a", "com.a2", "com.b"])
+
+        fake.set(urlB, json: altStore(name: "B", apps: [("com.b2", "App B2")]))
+        _ = try await store.refreshAll()
+        let afterRefreshAll = try await ids()
+        XCTAssertEqual(afterRefreshAll, ["com.a", "com.a2", "com.b2"])
+
+        try await store.remove(url: urlA)
+        let afterRemove = try await ids()
+        XCTAssertEqual(afterRemove, ["com.b2"])
+    }
+
     func testUnreadableFileIsReportedNotOverwritten() async throws {
         let paths = try CatalogFixtures.temporaryHome()
         try paths.ensure()

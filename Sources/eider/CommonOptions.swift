@@ -34,6 +34,15 @@ func requireBundleID(_ text: String) throws {
     }
 }
 
+/// An id looked up in the sources only (`eider info`), never turned into a path:
+/// sources list ids the strict check refuses (`cypwn.AppCake+.7.2.2`), and
+/// `eider search` shows them, so a lookup takes what a source may list.
+func requireCatalogID(_ text: String) throws {
+    guard CatalogIdentifier.isListable(text) else {
+        throw ValidationError("\(DisplayText.escapingControls(text)) is not an id a source can list: it is empty, longer than \(CatalogIdentifier.maxBytes) bytes or has control characters.")
+    }
+}
+
 /// `--settle` for `open` and `doctor`: how long the app must stay up to count
 /// as running. It has to be positive and shorter than `--timeout`, or the probe
 /// could never answer "running". With no `--settle` the probe's default applies,

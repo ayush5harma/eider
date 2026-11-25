@@ -57,6 +57,10 @@ enum LenientJSON {
     static func text(_ value: Any?) -> String? {
         switch value {
         case let text as String:
+            // Trimming only touches the ends: visible ASCII at both means nothing to trim.
+            if let first = text.utf8.first, let last = text.utf8.last, isVisibleASCII(first), isVisibleASCII(last) {
+                return text
+            }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         case let number as NSNumber where !isBoolean(number):
@@ -65,6 +69,8 @@ enum LenientJSON {
             return nil
         }
     }
+
+    private static func isVisibleASCII(_ byte: UInt8) -> Bool { byte > 0x20 && byte < 0x7F }
 
     static func isBoolean(_ number: NSNumber) -> Bool {
         CFGetTypeID(number) == CFBooleanGetTypeID()
@@ -91,8 +97,29 @@ enum LenientJSON {
 
 /// Dates as real sources write them: ISO 8601 with or without fractional
 /// seconds or zone, a space instead of the T, or a bare calendar day (read as
-/// midnight UTC).
-struct LenientDates {
+/// midnight UTC). The common shapes are read by hand (`InternetDate`); the rest
+/// go through the formatters, built on first need, and their answers are kept
+/// for the rest of the parse, since one source tends to repeat one odd shape.
+/// One instance per parse: not thread-safe.
+final class LenientDates {
+    private lazy var formatters = DateFormatters()
+    private var remembered: [String: Date?] = [:]
+
+    func parse(_ value: Any?) -> Date? {
+        guard let text = LenientJSON.text(value) else { return nil }
+        if let date = InternetDate.parse(text) { return date }
+        if let known = remembered[text] { return known }
+        let date = formatters.parse(text)
+        remembered[text] = date
+        return date
+    }
+
+    /// The formatters alone, which are what every date went through before the fast
+    /// path: the tests hold the fast path to their answers.
+    func parseWithFormattersOnly(_ text: String) -> Date? { formatters.parse(text) }
+}
+
+private struct DateFormatters {
     private let internet = ISO8601DateFormatter()
     private let fractional: ISO8601DateFormatter
     private let patterns: [DateFormatter]
@@ -113,8 +140,7 @@ struct LenientDates {
         }
     }
 
-    func parse(_ value: Any?) -> Date? {
-        guard let text = LenientJSON.text(value) else { return nil }
+    func parse(_ text: String) -> Date? {
         if let date = internet.date(from: text) ?? fractional.date(from: text) { return date }
         for formatter in patterns {
             if let date = formatter.date(from: text) { return date }

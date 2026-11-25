@@ -39,24 +39,27 @@ enum AltStoreParser {
     private static func parseApp(_ item: JSONDict, index: Int, context: inout ParseContext) -> CatalogApp? {
         // A name that is nothing but invisible characters is still a name the source gave:
         // the app is listed under its bundle id rather than skipped.
-        let bundleID = item.string("bundleIdentifier")
+        // The id is the source's label for the app, kept as given (see CatalogIdentifier).
+        let bundleID = CatalogIdentifier.cleaned(item.string("bundleIdentifier"))
         let name = item.displayName("name") ?? (item.string("name") != nil ? bundleID : nil)
-        let label = "app #\(index) (\(bundleID ?? name ?? "unnamed"))"
+        // Built only when a line is written: 17k entries in one source made the eager
+        // string a measurable share of the parse.
+        let label = { "app #\(index) (\(bundleID.map(CatalogIdentifier.quoted) ?? name ?? "unnamed"))" }
         guard let bundleID else {
-            context.warn("\(label): no bundle identifier, skipped")
+            context.warn("\(label()): no bundle identifier, skipped")
             return nil
         }
-        guard BundleIdentifier.isValid(bundleID) else {
-            context.warn("\(label): not a valid bundle identifier, skipped")
+        guard !CatalogIdentifier.isTooLong(bundleID) else {
+            context.warn("\(label()): bundle identifier longer than \(CatalogIdentifier.maxBytes) bytes, skipped")
             return nil
         }
         guard let name else {
-            context.warn("\(label): no name, skipped")
+            context.warn("\(label()): no name, skipped")
             return nil
         }
         let versions = parseVersions(of: item, label: label, context: &context)
         guard !versions.isEmpty else {
-            context.warn("\(label): no downloadable version, skipped")
+            context.warn("\(label()): no downloadable version, skipped")
             return nil
         }
         return CatalogApp(
@@ -73,11 +76,11 @@ enum AltStoreParser {
         )
     }
 
-    private static func parseVersions(of app: JSONDict, label: String, context: inout ParseContext) -> [CatalogVersion] {
+    private static func parseVersions(of app: JSONDict, label: () -> String, context: inout ParseContext) -> [CatalogVersion] {
         var versions: [CatalogVersion] = []
         for (index, element) in (app.array("versions") ?? []).enumerated() {
             guard let entry = element as? JSONDict else { continue }
-            if let version = parseVersion(entry, flat: false, label: "\(label) version #\(index + 1)", context: &context) {
+            if let version = parseVersion(entry, flat: false, label: { "\(label()) version #\(index + 1)" }, context: &context) {
                 versions.append(version)
             }
         }
@@ -89,17 +92,17 @@ enum AltStoreParser {
     }
 
     private static func parseVersion(
-        _ entry: JSONDict, flat: Bool, label: String, context: inout ParseContext
+        _ entry: JSONDict, flat: Bool, label: () -> String, context: inout ParseContext
     ) -> CatalogVersion? {
         guard let download = context.downloadURL(entry.string("downloadURL"), label: label) else { return nil }
         guard let number = entry.displayName("version", "marketingVersion") else {
-            context.warn("\(label): no version number, skipped")
+            context.warn("\(label()): no version number, skipped")
             return nil
         }
         var sha256: String?
         if let raw = entry.string("sha256") {
             sha256 = LenientJSON.sha256(raw)
-            if sha256 == nil { context.warn("\(label): sha256 is not 64 hex characters, ignored") }
+            if sha256 == nil { context.warn("\(label()): sha256 is not 64 hex characters, ignored") }
         }
         return CatalogVersion(
             version: number,
