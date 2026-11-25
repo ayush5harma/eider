@@ -71,13 +71,24 @@ clean_trash() {
   done
   return 0
 }
-# dyld writes its report within the second of the crash (measured 2026-11-25),
-# so by cleanup time every report this run caused is on disk.
+# A report is the run's own when it is newer than the run's start and names the
+# probe: a dyld failure's header carries the bundle id, an uncaught exception's
+# does not but carries the binary's slice_uuid (both measured 2026-11-26).
+# Both kinds are written within the second of the crash, so by cleanup time
+# every report this run caused is on disk.
+PROBE_UUID=""
+record_probe_uuid() {
+  PROBE_UUID=$(xcrun dwarfdump --uuid "$APP/Probe" 2>/dev/null | awk 'NR == 1 { print tolower($2) }')
+}
 clean_crash_reports() {
-  local f
+  local f header
   for f in "$HOME/Library/Logs/DiagnosticReports"/Probe-*.ips; do
     [ -f "$f" ] && [ "$f" -nt "$W/run.start" ] || continue
-    head -n 1 "$f" | grep -qF "\"bundleID\":\"$BID\"" && rm -f "$f"
+    header=$(head -n 1 "$f")
+    case "$header" in
+      *"\"bundleID\":\"$BID\""*) rm -f "$f" ;;
+      *"\"slice_uuid\":\"$PROBE_UUID\""*) [ -n "$PROBE_UUID" ] && rm -f "$f" ;;
+    esac
   done
   return 0
 }
@@ -175,6 +186,7 @@ check "info shows the app and that it is not installed yet" test "$(jget data.ap
 # ── install version 1 from the catalog ──────────────────────────────────────
 echo "install $BID (version 1)"
 run_json install "$BID" --dest "$W/apps"
+record_probe_uuid
 check "install succeeds" test "$RC" = 0
 check "the result names the installed version" is data.app.version 1.0
 check "download events were reported" grep -q '"phase":"download"' "$W/out"
