@@ -38,6 +38,46 @@ final class DiagnosticsEvidenceTests: XCTestCase {
         XCTAssertNil(LaunchEvidence.newestCrashReport(process: "Probe", in: scratch.url("missing"), since: now))
     }
 
+    // MARK: Log text
+
+    /// A multi-line event (an exception's backtrace) is printed by `log show` as
+    /// the first line followed by tab-indented continuation lines. They must
+    /// survive: the classifier reads the "thrown from" frame out of them.
+    func testLogOutputKeepsTabIndentedContinuationLines() {
+        let output = """
+        Timestamp                       Ty Process[PID:TID]
+        2026-11-25 23:49:20.471 Df Telegram[32403:314a77] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: 'x'
+        \t0   CoreFoundation                      0x00000001996d680c __exceptionPreprocess + 176
+        \t5   nicegram-BlackScreenFIX.dylib       0x0000000101118d64 +[FCAlertView getResourcesBundle] + 176
+
+        2026-11-25 23:49:20.980 Df Telegram[32403:314a77] next event
+        """
+        let lines = LaunchEvidence.lines(ofLogOutput: output)
+        XCTAssertEqual(lines.count, 5)   // the blank line is dropped
+        XCTAssertTrue(lines.contains { $0.contains("nicegram-BlackScreenFIX.dylib") }, "\(lines)")
+        let diagnosis = LaunchClassifier.classify(lines: lines, processName: "Telegram", appBinaries: ["nicegram-BlackScreenFIX.dylib"])
+        XCTAssertEqual(diagnosis.code, .uncaughtException)
+        XCTAssertTrue(diagnosis.summary.contains("in +[FCAlertView getResourcesBundle]"), diagnosis.summary)
+    }
+
+    // MARK: The app's own binaries
+
+    func testAppBinaryNamesAreTheMachOFilesInsideTheBundle() throws {
+        let scratch = try EngineScratch()
+        let app = scratch.url("Probe.app")
+        let framework = app.appendingPathComponent("Frameworks/Kit.framework", isDirectory: true)
+        try FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
+        let machO = Data([0xCF, 0xFA, 0xED, 0xFE]) + Data(repeating: 0, count: 28)   // MH_MAGIC_64, little endian
+        try machO.write(to: app.appendingPathComponent("Probe"))
+        try machO.write(to: app.appendingPathComponent("Frameworks/tweak.dylib"))
+        try machO.write(to: framework.appendingPathComponent("Kit"))
+        try Data("not a binary".utf8).write(to: app.appendingPathComponent("Info.plist"))
+        try Data(repeating: 0, count: 64).write(to: app.appendingPathComponent("data.bin"))
+
+        XCTAssertEqual(LaunchEvidence.appBinaryNames(inBundle: app), ["Probe", "tweak.dylib", "Kit"])
+        XCTAssertEqual(LaunchEvidence.appBinaryNames(inBundle: scratch.url("missing")), [])
+    }
+
     func testReportTextIsCapped() throws {
         let scratch = try EngineScratch()
         let file = scratch.url("big.ips")

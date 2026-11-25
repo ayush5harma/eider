@@ -21,7 +21,32 @@ enum LaunchEvidence {
     static func logLines(process: String, since start: Date) async -> [String] {
         let result = try? await ProcessRunner.runAsync(logExecutable, logArguments(process: process, since: start))
         guard let result, result.succeeded else { return [] }
-        return result.output.split(whereSeparator: \.isNewline).map(String.init)
+        return lines(ofLogOutput: result.output)
+    }
+
+    /// One entry per non-empty line. An event with a backtrace prints its first
+    /// line and then the frames as tab-indented continuation lines; they are
+    /// kept verbatim because the classifier reads the throwing frame from them.
+    static func lines(ofLogOutput output: String) -> [String] {
+        output.split(whereSeparator: \.isNewline).map(String.init)
+    }
+
+    // MARK: The app's binaries
+
+    /// File names of the Mach-O files inside an app bundle (the main
+    /// executable, frameworks, dylibs, extensions), which is how a backtrace
+    /// frame is told apart as the app's own code rather than the system's.
+    /// Only the first bytes of each file are read (`MachOFiles.kind`).
+    static func appBinaryNames(inBundle bundle: URL) -> Set<String> {
+        let keys: [URLResourceKey] = [.isRegularFileKey]
+        guard let walker = FileManager.default.enumerator(at: bundle, includingPropertiesForKeys: keys) else { return [] }
+        var names = Set<String>()
+        for case let file as URL in walker {
+            guard (try? file.resourceValues(forKeys: Set(keys)).isRegularFile) == true,
+                  MachOFiles.kind(of: file) != .notMachO else { continue }
+            names.insert(file.lastPathComponent)
+        }
+        return names
     }
 
     /// `log show --start` takes local time, "yyyy-MM-dd HH:mm:ss".
