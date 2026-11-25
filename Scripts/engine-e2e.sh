@@ -9,7 +9,8 @@
 #
 # Covers what legacy/test/e2e.sh asserts for its non-PlayTools installs:
 #   default     shipped idiom, the binary's own SDK kept, sandboxed with no
-#               extra sandbox exceptions, embedded framework loads, GL lookups
+#               extra sandbox exceptions, the IPA's application-groups entitlement
+#               carried into the signature, embedded framework loads, GL lookups
 #               answer OpenGL ES, an app-group folder is writable in the
 #               container, a keychain item survives a relaunch
 #   mac idiom   --mac-idiom runs the app in the Mac idiom, and a prebuilt
@@ -129,6 +130,8 @@ check "the binary is Mac Catalyst" catalyst
 check "the binary keeps its own SDK ($SDK)" stamped_sdk "$SDK"
 check "sandboxed" has_entitlement app-sandbox
 check "no sandbox exceptions beyond the base set" lacks_entitlement temporary-exception
+check "the IPA's own app group is carried into the new signature" has_entitlement group.local.ipa-install-on-mac.probe
+check "nothing else of the IPA's entitlements is carried (no application-identifier)" lacks_entitlement application-identifier
 check "OpenGL ES redirect linked (the probe links OpenGL ES)" links libipagles.dylib
 check "keychain shim linked" links libipakeychain.dylib
 check "CallKit shim linked (the probe links CallKit)" links libipacallkit.dylib

@@ -7,28 +7,34 @@ struct BundleSigner {
     /// PlayCover's base set: sandboxed, so the app gets its own container instead
     /// of writing into ~/Documents, with the capabilities a sandboxed app may ASK
     /// for (camera, microphone, location, contacts, calendars, files).
-    static let entitlements = """
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0"><dict>
-      <key>com.apple.security.app-sandbox</key><true/>
-      <key>com.apple.security.network.client</key><true/>
-      <key>com.apple.security.network.server</key><true/>
-      <key>com.apple.security.device.camera</key><true/>
-      <key>com.apple.security.device.audio-input</key><true/>
-      <key>com.apple.security.device.bluetooth</key><true/>
-      <key>com.apple.security.device.usb</key><true/>
-      <key>com.apple.security.files.downloads.read-write</key><true/>
-      <key>com.apple.security.files.user-selected.read-write</key><true/>
-      <key>com.apple.security.personal-information.addressbook</key><true/>
-      <key>com.apple.security.personal-information.calendars</key><true/>
-      <key>com.apple.security.personal-information.location</key><true/>
-      <key>com.apple.security.assets.movies.read-write</key><true/>
-      <key>com.apple.security.assets.music.read-write</key><true/>
-      <key>com.apple.security.assets.pictures.read-write</key><true/>
-      <key>com.apple.security.print</key><true/>
-    </dict></plist>
-    """
+    static let baseEntitlements: [String: Bool] = [
+        "com.apple.security.app-sandbox": true,
+        "com.apple.security.network.client": true,
+        "com.apple.security.network.server": true,
+        "com.apple.security.device.camera": true,
+        "com.apple.security.device.audio-input": true,
+        "com.apple.security.device.bluetooth": true,
+        "com.apple.security.device.usb": true,
+        "com.apple.security.files.downloads.read-write": true,
+        "com.apple.security.files.user-selected.read-write": true,
+        "com.apple.security.personal-information.addressbook": true,
+        "com.apple.security.personal-information.calendars": true,
+        "com.apple.security.personal-information.location": true,
+        "com.apple.security.assets.movies.read-write": true,
+        "com.apple.security.assets.music.read-write": true,
+        "com.apple.security.assets.pictures.read-write": true,
+        "com.apple.security.print": true,
+    ]
+
+    /// The app's entitlements as an XML plist: the base set, plus the app's own
+    /// app-group ids when it has any. Built as a dictionary and serialised, never
+    /// templated, so no id can break out of the plist. `appGroups` must already
+    /// have passed `AppGroups.filter`.
+    static func entitlementsPlist(appGroups: [String]) throws -> Data {
+        var entitlements: [String: Any] = baseEntitlements
+        if !appGroups.isEmpty { entitlements[AppGroups.entitlementKey] = appGroups }
+        return try PropertyListSerialization.data(fromPropertyList: entitlements, format: .xml, options: 0)
+    }
 
     let app: URL
     let workDirectory: URL
@@ -39,7 +45,8 @@ struct BundleSigner {
     /// Every Mach-O on its own (`codesign --deep` finds no nested code in an iOS
     /// flat bundle, so frameworks would keep the signature of the bytes just
     /// rewritten and the kernel would kill the process at dyld's first page),
-    /// then each nested bundle inside-out, then the app with its entitlements.
+    /// then each nested bundle inside-out, then the app with its entitlements
+    /// (the base set and `appGroups`; nested bundles are signed without any).
     /// Serial on purpose: signing the main binary and a framework binary of the
     /// same bundle at once failed with "No such file or directory" on the first
     /// end-to-end run (2026-11-11), so the legacy one-at-a-time order is kept.
@@ -47,7 +54,7 @@ struct BundleSigner {
     /// A nested bundle that will not sign is not an install failure by itself (an
     /// iOS bundle can carry resource bundles codesign has no use for), but it is
     /// reported through `warn` instead of vanishing; `verify` is the gate.
-    func sign(machOs: [URL], warn: (String) -> Void = { _ in }) throws {
+    func sign(machOs: [URL], appGroups: [String] = [], warn: (String) -> Void = { _ in }) throws {
         for file in machOs {
             let result = try ProcessRunner.run(Self.codesign, ["--force", "--sign", "-", file.path])
             guard result.succeeded else {
@@ -63,7 +70,7 @@ struct BundleSigner {
             }
         }
         let entitlementsFile = workDirectory.appendingPathComponent("entitlements.plist")
-        try Self.entitlements.write(to: entitlementsFile, atomically: true, encoding: .utf8)
+        try Self.entitlementsPlist(appGroups: appGroups).write(to: entitlementsFile, options: .atomic)
         let result = try ProcessRunner.run(Self.codesign, ["--force", "--sign", "-", "--entitlements", entitlementsFile.path, app.path])
         guard result.succeeded else { throw InstallFailure(.signingFailed, "codesign failed on the app: \(result.errorLine)") }
     }
