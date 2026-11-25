@@ -151,9 +151,13 @@ public actor SourceStore {
 
     /// Seconds since 1970 round-trip a Date exactly; ISO 8601 text would drop
     /// the fraction and make a reloaded source compare unequal to the saved one.
+    /// Compact, because the file is rewritten whole on every change: indented and
+    /// key-sorted, one 17,430-app source made it 22 MB. Older indented files still
+    /// read, since the decoder does not care about whitespace or key order. The file
+    /// is mostly URLs, so slashes are not escaped either (`\/` reads the same).
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .secondsSince1970
         return encoder
     }()

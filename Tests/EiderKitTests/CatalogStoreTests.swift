@@ -179,6 +179,40 @@ final class CatalogStoreTests: XCTestCase {
         XCTAssertEqual(apps.map(\.sourceURL), [urlA, urlB, urlB])
     }
 
+    /// The file is rewritten whole on every change, and a 17k-app source made the
+    /// indented, key-sorted form 22 MB: it is written compact now.
+    func testTheFileIsWrittenCompact() async throws {
+        let paths = try CatalogFixtures.temporaryHome()
+        let fake = FakeFetch()
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A"), ("com.b", "App B")]))
+        _ = try await SourceStore(paths: paths, fetch: fake.fetch).add(url: urlA)
+        let text = try String(contentsOf: paths.sourcesFile, encoding: .utf8)
+        XCTAssertFalse(text.contains("\n"), "no line breaks")
+        XCTAssertFalse(text.contains("\": "), "no space after a key")
+    }
+
+    /// Files written before the change were pretty-printed with sorted keys; they
+    /// must still load, exactly.
+    func testAnOldPrettyPrintedFileStillLoads() async throws {
+        struct OldFile: Encodable {
+            var version = 1
+            var sources: [CatalogSource]
+        }
+        let paths = try CatalogFixtures.temporaryHome()
+        let fake = FakeFetch()
+        fake.set(urlA, json: altStore(name: "A", apps: [("com.a", "App A")]))
+        let saved = try await SourceStore(paths: paths, fetch: fake.fetch).add(url: urlA)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        try encoder.encode(OldFile(sources: [saved])).write(to: paths.sourcesFile)
+        XCTAssertTrue(try String(contentsOf: paths.sourcesFile, encoding: .utf8).contains("\n  "), "the fixture really is the old form")
+
+        let reloaded = try await SourceStore(paths: paths, fetch: fake.fetch).sources
+        XCTAssertEqual(reloaded, [saved])
+    }
+
     func testUnreadableFileIsReportedNotOverwritten() async throws {
         let paths = try CatalogFixtures.temporaryHome()
         try paths.ensure()
