@@ -13,14 +13,20 @@ struct OpenCommand: AsyncParsableCommand {
     @Option(help: "Seconds to wait for the app to come up.")
     var timeout: Double = 20
 
+    @Option(help: "Seconds the app must stay up to count as running (default 8; must be less than --timeout).")
+    var settle: Double?
+
     @OptionGroup var common: CommonOptions
 
-    func validate() throws { try requireBundleID(bundleID) }
+    func validate() throws {
+        try requireBundleID(bundleID)
+        _ = try resolveSettle(settle, timeout: timeout)
+    }
 
     func run() async throws {
         try await common.guarded { output in
             let app = try await LaunchOutcome.installedApp(bundleID)
-            let result = await LaunchProbe().launch(app, timeout: timeout)
+            let result = await LaunchProbe(settle: try resolveSettle(settle, timeout: timeout)).launch(app, timeout: timeout)
             try LaunchOutcome.report(result, app: app, output: output, healthyText: "Opened")
         }
     }
