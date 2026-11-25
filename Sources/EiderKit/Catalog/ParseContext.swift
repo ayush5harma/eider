@@ -29,10 +29,10 @@ struct ParseContext {
 
     /// A download URL that is present but refused deserves a line, because it
     /// is the reason an app disappears.
-    mutating func downloadURL(_ raw: String?, label: String) -> URL? {
+    mutating func downloadURL(_ raw: String?, label: () -> String) -> URL? {
         guard let raw else { return nil }
         if let url = url(raw) { return url }
-        warn("\(label): download address not allowed or not valid (\(raw))")
+        warn("\(label()): download address not allowed or not valid (\(raw))")
         return nil
     }
 

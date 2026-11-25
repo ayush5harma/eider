@@ -57,6 +57,10 @@ enum LenientJSON {
     static func text(_ value: Any?) -> String? {
         switch value {
         case let text as String:
+            // Trimming only touches the ends: visible ASCII at both means nothing to trim.
+            if let first = text.utf8.first, let last = text.utf8.last, isVisibleASCII(first), isVisibleASCII(last) {
+                return text
+            }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         case let number as NSNumber where !isBoolean(number):
@@ -65,6 +69,8 @@ enum LenientJSON {
             return nil
         }
     }
+
+    private static func isVisibleASCII(_ byte: UInt8) -> Bool { byte > 0x20 && byte < 0x7F }
 
     static func isBoolean(_ number: NSNumber) -> Bool {
         CFGetTypeID(number) == CFBooleanGetTypeID()
