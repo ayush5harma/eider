@@ -131,6 +131,8 @@ check "sandboxed" has_entitlement app-sandbox
 check "no sandbox exceptions beyond the base set" lacks_entitlement temporary-exception
 check "OpenGL ES redirect linked (the probe links OpenGL ES)" links libipagles.dylib
 check "keychain shim linked" links libipakeychain.dylib
+check "CallKit shim linked (the probe links CallKit)" links libipacallkit.dylib
+check "camera shim linked (the probe links AVFoundation)" links libipacamera.dylib
 check "app-group shim linked" links libipagroups.dylib
 check "embedded.mobileprovision removed" test ! -e "$APP/embedded.mobileprovision"
 check "bundle signature verifies" codesign --verify --strict "$APP"
