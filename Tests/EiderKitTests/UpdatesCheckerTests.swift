@@ -42,6 +42,47 @@ final class UpdatesCheckerTests: XCTestCase {
         XCTAssertEqual(AppVersion.compare("v1.2", "1.2"), .orderedSame)
     }
 
+    func testWhatIsDottedNumeric() {
+        for text in ["1", "1.2", "1.2.3", "v1.2", "1.2-beta", "1.0b2", "3.8.14 (5)", "2026.11.22"] {
+            XCTAssertTrue(AppVersion.isDottedNumeric(text), text)
+        }
+        for text in ["8b6e503", "nightly", "beta", "abc1234", "", "v", "2a", "1a"] {
+            XCTAssertFalse(AppVersion.isDottedNumeric(text), text)
+        }
+    }
+
+    /// A commit hash that starts with a digit used to read as version 8.
+    func testAHashOrLabelNeverOutranksANumber() {
+        XCTAssertEqual(AppVersion.compare("8b6e503", "3.8.14"), .orderedAscending)
+        XCTAssertEqual(AppVersion.compare("3.8.14", "8b6e503"), .orderedDescending)
+        XCTAssertEqual(AppVersion.compare("nightly", "0.0.1"), .orderedAscending)
+        XCTAssertEqual(AppVersion.compare("8b6e503", "9f00d11"), .orderedSame, "no order between two hashes")
+        XCTAssertFalse(AppVersion.isNewer(version: "8b6e503", build: nil, than: "3.8.14", build: nil))
+    }
+
+    func testLiveContainerHashEntryIsNotOfferedAsAnUpdate() {
+        // com.kdt.livecontainer 3.8.14 installed; the source also lists a hash-named build.
+        let id = "com.kdt.livecontainer"
+        let entry = catalog(sourceA, [("3.8.14", nil), ("8b6e503", nil)], id: id)
+        XCTAssertTrue(UpdateChecker.updates(installed: [installed("3.8.14", from: sourceA, id: id)], catalog: [entry]).isEmpty)
+        XCTAssertEqual(UpdateChecker.newestVersion(of: entry.app)?.version, "3.8.14")
+
+        // The unmerged form, as an old sources.json holds it: two entries, hash listed last.
+        let split = [catalog(sourceA, [("3.8.14", nil)], id: id), catalog(sourceA, [("8b6e503", nil)], id: id)]
+        XCTAssertTrue(UpdateChecker.updates(installed: [installed("3.8.14", from: sourceA, id: id)], catalog: split).isEmpty)
+        XCTAssertEqual(UpdateChecker.updates(installed: [installed("3.8.0", from: sourceA, id: id)], catalog: split).first?.version.version, "3.8.14")
+    }
+
+    func testNewestAmongLabelsFollowsTheDateThenSourceOrder() {
+        func version(_ text: String, _ date: Date?) -> CatalogVersion {
+            CatalogVersion(version: text, date: date, downloadURL: URL(string: "https://cdn.example.com/\(text).ipa")!)
+        }
+        let dated = CatalogApp(bundleID: "com.x", name: "X", versions: [version("beta", .utc(2026, 1, 1)), version("nightly", .utc(2026, 3, 1))])
+        XCTAssertEqual(UpdateChecker.newestVersion(of: dated)?.version, "nightly")
+        let undated = CatalogApp(bundleID: "com.x", name: "X", versions: [version("beta", nil), version("nightly", nil)])
+        XCTAssertEqual(UpdateChecker.newestVersion(of: undated)?.version, "beta", "source order")
+    }
+
     func testBuildDecidesOnlyWhenVersionsAreEqual() {
         XCTAssertTrue(AppVersion.isNewer(version: "1.0", build: "10", than: "1.0", build: "9"))
         XCTAssertFalse(AppVersion.isNewer(version: "1.0", build: "9", than: "1.0", build: "10"))
