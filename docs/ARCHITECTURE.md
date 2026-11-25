@@ -83,6 +83,29 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   by the merged order, installs and `UpdateChecker`: numeric versions by number,
   never a hash or label above a number, date only as a late tie-break
   (docs/SOURCES.md).
+- Provenance and update matching. A catalog install or update records an
+  optional `InstallOrigin` on the library entry: the source's address and the
+  entry id as the source lists it. The listed id may differ from the IPA's own
+  (an entry listed as "com.kdt.l!vecontainer" installs as
+  "com.kdt.livecontainer"), so the origin is the only link back to the entry.
+  Both strings are data, compared with the catalog and never made into a path.
+  The key is absent in entries written before it, and those load unchanged;
+  a file or plain-address install has none. `UpdateChecker` takes, per
+  installed app, the origin's entry if that source is still added and still
+  lists it; otherwise, for an old entry, the entries with its bundle id in the
+  source it recorded; otherwise every entry with its bundle id in any source.
+  A known origin is never widened to other sources. The offer is the
+  candidate version that `ranksAbove` the rest, only if it is newer than the
+  installed version (`AppVersion.isNewer`), and it names the source and entry
+  it comes from. `AppOperations.update` installs exactly that version from
+  there, keeps the installed options and data, and passes the installed id as
+  `replacingBundleID`: an IPA whose final id differs stops before placement,
+  so an update can replace the app it was asked to or nothing, never add a
+  second one. The CLI (`eider list`, `eider update [--all]`) and the app use
+  the same matcher. The app works the list out off the main actor at each
+  reload, fetches sources older than six hours in the background at launch,
+  runs Update All one app at a time through Activity, and shows the count on
+  the Updates sidebar item and the Dock tile (`DockBadge`).
 - Catalog parsing is hot (one source in use lists 17,430 entries): dates in the
   common shapes are read by hand (`InternetDate`) before any formatter,
   warning text is built only when a warning is written, and printable ASCII
