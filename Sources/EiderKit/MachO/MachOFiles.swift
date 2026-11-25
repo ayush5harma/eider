@@ -94,16 +94,17 @@ public enum MachOFiles {
     public static func readImage(at url: URL) throws -> MachOImage {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+        return try loadImage(from: handle, at: try arm64Extent(of: handle).offset)
+    }
+
+    /// Where the arm64 slice sits in the file: the whole file when thin.
+    static func arm64Extent(of handle: FileHandle) throws -> (offset: UInt64, size: UInt64) {
         let size = try handle.seekToEnd()
         try handle.seek(toOffset: 0)
         let head = try handle.read(upToCount: sniffLength) ?? Data()
-        let offset: UInt64
-        if let slices = MachOFat.slices(in: head, fileSize: size) {
-            offset = try MachOFat.arm64Slice(of: slices).offset
-        } else {
-            offset = 0
-        }
-        return try loadImage(from: handle, at: offset)
+        guard let slices = MachOFat.slices(in: head, fileSize: size) else { return (0, size) }
+        let slice = try MachOFat.arm64Slice(of: slices)
+        return (slice.offset, slice.size)
     }
 
     /// Edit a thin file's header region in place. Nothing is written when the
@@ -120,7 +121,7 @@ public enum MachOFiles {
         try handle.write(contentsOf: image.bytes)
     }
 
-    private static func loadImage(from handle: FileHandle, at offset: UInt64) throws -> MachOImage {
+    static func loadImage(from handle: FileHandle, at offset: UInt64) throws -> MachOImage {
         try handle.seek(toOffset: offset)
         guard let header = try handle.read(upToCount: MachOConstant.headerSize), header.count == MachOConstant.headerSize else {
             throw MachOError.notMachO

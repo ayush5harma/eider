@@ -19,6 +19,8 @@ final class InstallRun: @unchecked Sendable {
     private var identity: BundleIdentity!
     private var converter: BundleConverter!
     private var app: URL!
+    /// The IPA's own app-group ids, read before conversion; the signature carries them.
+    private var appGroups: [String] = []
 
     init(ipa: URL, options: InstallOptions, shims: ShimLocator, extractor: IPAExtractor, reset: DataReset, recorded: [InstalledApp] = [], onEvent: @escaping @Sendable (InstallEvent) -> Void) {
         self.ipa = ipa
@@ -58,6 +60,7 @@ final class InstallRun: @unchecked Sendable {
         try refuseEncrypted(machOs)
         // Read before conversion, which rewrites load commands but keeps these.
         let linkedDylibs = machOs.flatMap { (try? MachOFiles.readImage(at: $0).linkedDylibs()) ?? [] }
+        readAppGroups()
         try convert(machOs)
         try editBundle()
         let linked = try link(linkedDylibs: linkedDylibs, extras: extras)
@@ -124,6 +127,19 @@ final class InstallRun: @unchecked Sendable {
         }
     }
 
+    /// Apps such as iSH parse their own signature for the group id and crash when
+    /// it is missing, so the app's application-groups entitlement (and nothing
+    /// else of the original) is signed back in. The ids reach file paths in the
+    /// app-group shim, so `AppGroups` drops any that are not plain names.
+    private func readAppGroups() {
+        let result = AppGroups.read(from: executableURL)
+        appGroups = result.groups
+        if !result.groups.isEmpty { emit(.validate, "Keeping the app's app group(s): \(result.groups.joined(separator: ", "))", 0.28) }
+        if result.dropped > 0 {
+            emit(.warning, "Dropped \(result.dropped) app-group id(s) from the app's entitlements that are not plain names.", 0.28)
+        }
+    }
+
     private func convert(_ machOs: [URL]) throws {
         for (index, file) in machOs.enumerated() {
             emit(.convert, "Converting \(converter.relative(file)) to Mac Catalyst", 0.3 + 0.3 * Double(index) / Double(machOs.count))
@@ -182,7 +198,7 @@ final class InstallRun: @unchecked Sendable {
     private func sign(_ machOs: [URL], work: URL) throws {
         emit(.sign, "Signing \(machOs.count) binaries (ad hoc)", 0.72)
         let signer = BundleSigner(app: app, workDirectory: work, relative: converter.relative)
-        try signer.sign(machOs: machOs, warn: { [weak self] in self?.emit(.warning, $0, 0.85) })
+        try signer.sign(machOs: machOs, appGroups: appGroups, warn: { [weak self] in self?.emit(.warning, $0, 0.85) })
         emit(.verify, "Verifying signatures", 0.9)
         try signer.verify(machOs: machOs)
         BundleSigner.clearQuarantine(under: app)
