@@ -244,6 +244,17 @@ final class CatalogFetcherTests: XCTestCase {
         XCTAssertEqual(body, Data("{}".utf8))
     }
 
+    /// fastsign.dev/repo.json was 23,938,512 bytes on 2026-11-26, sent with no
+    /// Content-Length, and the old 20 MB default refused it.
+    func testTheDefaultCapTakesTheLargestSourceSeenInUse() async throws {
+        let fieldSize = 23_938_512
+        let chunk = Data(count: 1 << 20)
+        let chunks = Array(repeating: chunk, count: fieldSize / chunk.count) + [Data(count: fieldSize % chunk.count)]
+        StubURLProtocol.handler = { _ in .init(chunks: chunks) }
+        let body = try await fetch(SourceFetcher.maxBytes)
+        XCTAssertEqual(body.count, fieldSize)
+    }
+
     func testRefusesAnOversizeContentLength() async {
         StubURLProtocol.handler = { _ in .init(headers: ["Content-Length": "5000"], chunks: []) }
         do {

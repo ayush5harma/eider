@@ -5,14 +5,18 @@ import Foundation
 public typealias SourceFetch = @Sendable (URL) async throws -> Data
 
 public enum SourceFetcher {
-    public static let maxBytes: Int64 = 20 * 1024 * 1024
+    /// Bounds the buffer and the JSON decode. The largest source seen in use,
+    /// fastsign.dev/repo.json on 2026-11-26, is 22.8 MB with 17,430 apps and was
+    /// refused by the old 20 MB cap; 64 MB leaves it room to grow about threefold.
+    public static let maxBytes: Int64 = 64 * 1024 * 1024
     /// Seconds without a single byte arriving before the fetch fails.
     public static let idleTimeout: TimeInterval = 30
     /// Backstop for a server that trickles bytes forever: 15 minutes moves the
-    /// 20 MB cap at about 23 KB/s, slower than any link worth fetching over.
+    /// 64 MB cap at about 73 KB/s. The 22.8 MB source above took 112 s (about
+    /// 210 KB/s) on 2026-11-26.
     public static let overallTimeout: TimeInterval = 900
 
-    /// URLSession, 30 s idle, 20 MB, URL policy on the address and on every redirect.
+    /// URLSession, 30 s idle, 64 MB, URL policy on the address and on every redirect.
     public static let `default`: SourceFetch = { url in
         try await fetch(url, configuration: .ephemeral, maxBytes: maxBytes)
     }
