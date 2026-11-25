@@ -18,16 +18,30 @@ public enum DisplayText {
     /// A name or version string: every unsafe character removed, ends trimmed.
     public static func sanitized(_ text: String) -> String {
         if let plain = trimmedPlainASCII(text, keepingLineBreaks: false) { return plain }
-        return String(String.UnicodeScalarView(text.unicodeScalars.filter { !isUnsafe($0) }))
-            .trimmingCharacters(in: .whitespaces)
+        return filtered(text, keepingLineBreaks: false).trimmingCharacters(in: .whitespaces)
     }
 
     /// Longer prose (release notes, descriptions): line breaks and tabs survive,
     /// everything else `sanitized` removes does not.
     public static func sanitizedProse(_ text: String) -> String {
         if let plain = trimmedPlainASCII(text, keepingLineBreaks: true) { return plain }
-        return String(String.UnicodeScalarView(text.unicodeScalars.filter { !isUnsafe($0) || $0 == "\n" || $0 == "\t" }))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return filtered(text, keepingLineBreaks: true).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Text from JSONSerialization is a bridged NSString, read one character per
+    /// Objective-C call; one transcode to native UTF-8 first is cheaper (measured
+    /// on 17k descriptions). ASCII scalars are judged without a property lookup,
+    /// and text with nothing to remove is not rebuilt.
+    private static func filtered(_ text: String, keepingLineBreaks: Bool) -> String {
+        var native = text
+        native.makeContiguousUTF8()
+        func keep(_ scalar: Unicode.Scalar) -> Bool {
+            guard scalar.isASCII else { return !isUnsafe(scalar) }
+            if scalar.value >= 0x20 && scalar.value != 0x7F { return true }
+            return keepingLineBreaks && (scalar == "\n" || scalar == "\t")
+        }
+        if native.unicodeScalars.allSatisfy(keep) { return native }
+        return String(String.UnicodeScalarView(native.unicodeScalars.filter(keep)))
     }
 
     /// Most catalog text is printable ASCII, where nothing is unsafe and the only
