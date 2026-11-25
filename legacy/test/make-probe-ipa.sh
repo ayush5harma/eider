@@ -66,7 +66,16 @@ plutil -insert UISupportedInterfaceOrientations -json \
 # What a store copy carries and the installer must cope with.
 printf 'not a real profile\n' > "$APP/embedded.mobileprovision"
 codesign --force --sign - "$APP/Frameworks/ProbeKit.framework" >/dev/null 2>&1
-codesign --force --sign - "$APP" >/dev/null 2>&1
+# Signed with the app group a store build would carry, so the installer's
+# carrying of application-groups into the new signature can be asserted.
+cat > "$W/entitlements.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>application-identifier</key><string>TEAM123456.local.ipa-install-on-mac.probe</string>
+  <key>com.apple.security.application-groups</key><array><string>group.local.ipa-install-on-mac.probe</string></array>
+</dict></plist>
+PLIST
+codesign --force --sign - --entitlements "$W/entitlements.plist" "$APP" >/dev/null 2>&1
 plutil -create xml1 "$W/iTunesMetadata.plist"
 plutil -insert itemName -string "IPA Probe" "$W/iTunesMetadata.plist"
 

@@ -89,7 +89,8 @@ The Library and Browse sections, drawn by the app's own `--snapshot` mode agains
 5. Edit `Info.plist` (`MinimumOSVersion`, the Mac idiom if asked, name and id).
 6. Link the shims below into the main executable.
 7. Sign every binary and nested bundle ad hoc, then the app with a sandbox
-   entitlement set, and verify each signature strictly.
+   entitlement set plus the app's own app-group ids, and verify each signature
+   strictly.
 8. Stage the app on the destination volume, move any earlier copy to the
    Trash, move the new one in, and record it in `library.json`.
 

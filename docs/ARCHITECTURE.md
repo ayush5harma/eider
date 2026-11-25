@@ -43,6 +43,18 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   `ShimLinker.shimsToLink`; a dylib path read from an IPA is only compared to
   those fixed framework names, never used to build a path. `libipaneutralised`
   is the empty stand-in for a keychain-fix tweak.
+- The app is signed with a fixed sandbox entitlement set plus one thing read
+  from the IPA: `com.apple.security.application-groups`. `AppGroups.read`
+  takes it from the main executable's own signature
+  (`MachOEntitlements`, pure Swift, before conversion rewrites the binary)
+  because apps such as iSH read their group id back from their own signature
+  and crash on nil without it. Nothing else of the original entitlements is
+  copied: `application-identifier`, the team id and keychain groups belong to
+  a developer account, and an ad hoc signature that claims them is killed. Each
+  group id must be plain letters, digits, `.`, `-`, `_` (at most 255 bytes, at
+  most 32 groups, no `..`), because the groups shim turns it into a path; others
+  are dropped with an install warning. `libipagroups` still redirects the
+  container, since macOS refuses an ad hoc app the real one.
 - Nothing from an IPA or a source is trusted: https only (http for loopback
   only for a source added by a loopback address and its items, never from a
   remote source, a redirect from https or an `eider://` link; plus file URLs
