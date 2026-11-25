@@ -196,6 +196,7 @@ check "the registry records the source address" test "$(registry_get 0.sourceURL
 check "the registry records the IPA's SHA-256" test "$(registry_get 0.ipaSHA256)" = "$SHA1"
 check "bundle signature verifies" codesign --verify --strict "$APP"
 check "the shims are linked (keychain, app groups)" sh -c "otool -L '$APP/Probe' | grep -q libipakeychain && otool -L '$APP/Probe' | grep -q libipagroups"
+check "the call shims are linked (the probe links CallKit and AVFoundation)" sh -c "otool -L '$APP/Probe' | grep -q libipacallkit && otool -L '$APP/Probe' | grep -q libipacamera"
 if launch; then
   check "eider open reports the pid" test "$(jget data.running)" = true -a -n "$(jget data.pid)"
   check "shipped idiom (iPad, 1)" logged ' launch idiom=1 '

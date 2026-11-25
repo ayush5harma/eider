@@ -36,6 +36,13 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   CI) and found at run time through `EIDER_SHIMS_DIR`, else beside the
   executable (`../share/eider/shims`), else in the app bundle
   (`Contents/Resources/shims`).
+- The shims are `libipakeychain` (unless `--no-keychain`), `libipagroups`
+  (always), and three linked only when some binary in the bundle links the
+  framework each one corrects: `libipagles` (OpenGLES), `libipacallkit`
+  (CallKit) and `libipacamera` (AVFoundation). The decision is
+  `ShimLinker.shimsToLink`; a dylib path read from an IPA is only compared to
+  those fixed framework names, never used to build a path. `libipaneutralised`
+  is the empty stand-in for a keychain-fix tweak.
 - Nothing from an IPA or a source is trusted: https only (http for loopback
   only for a source added by a loopback address and its items, never from a
   remote source, a redirect from https or an `eider://` link; plus file URLs

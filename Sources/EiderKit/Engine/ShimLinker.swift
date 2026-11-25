@@ -9,6 +9,27 @@ struct ShimLinker {
 
     var frameworks: URL { app.appendingPathComponent("Frameworks", isDirectory: true) }
 
+    /// The shims an install links, in link order: the keychain shim unless
+    /// opted out, one per system framework some binary in the bundle links
+    /// (OpenGL ES, CallKit, AVFoundation: each shim corrects only that
+    /// framework, so an app that does not link it gets nothing), and the
+    /// app-group shim always. `linkedDylibs` is every dylib path any binary
+    /// of the bundle links, which the legacy installer searched the same way
+    /// (any binary, not just the main executable); a path is only compared
+    /// to fixed framework names, never used to build a path.
+    static func shimsToLink(keychain: Bool, linkedDylibs: [String]) -> [(shim: Shim, label: String)] {
+        func links(_ framework: String) -> Bool {
+            linkedDylibs.contains { $0.contains("/\(framework).framework/") }
+        }
+        var wanted: [(shim: Shim, label: String)] = []
+        if keychain { wanted.append((.keychain, "the keychain shim")) }
+        if links("OpenGLES") { wanted.append((.gles, "the OpenGL ES shim")) }
+        if links("CallKit") { wanted.append((.callKit, "the CallKit shim")) }
+        if links("AVFoundation") { wanted.append((.camera, "the camera shim")) }
+        wanted.append((.groups, "the app-group shim"))
+        return wanted
+    }
+
     /// Install `source` as `Frameworks/<name>` and link it. Returns the copy,
     /// which the signing step must cover.
     func link(_ source: URL, as name: String, installName: String, label: String, convert: ((URL) throws -> Void)? = nil) throws -> URL {
