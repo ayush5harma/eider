@@ -103,7 +103,10 @@ skipped with a warning. Use the id the IPA itself ships, though. Eider installs
 the app under the IPA's own `CFBundleIdentifier` and refuses an IPA whose id
 differs from the one the source lists, so an id the IPA does not carry (for
 example `cypwn.AppCake+.7.2.2`) installs only when the owner passes that IPA's
-id with `--bundle-id` (the Bundle id field in the app).
+id with `--bundle-id` (the Bundle id field in the app). On the command line,
+`eider install <id>` reads anything with a `/`, a URL scheme or an `.ipa`
+ending as a file or an address, so an entry whose id looks like one installs
+from the app only.
 
 ## What makes an IPA installable
 

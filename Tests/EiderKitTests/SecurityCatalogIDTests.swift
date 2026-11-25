@@ -39,6 +39,16 @@ final class SecurityCatalogIDTests: XCTestCase {
         XCTAssertLessThan(warning.utf8.count, 200, "the id is cut, not quoted whole")
     }
 
+    func testAWarningQuotesAtMostSixtyBytesOfAnOverlongID() {
+        let combining = "e" + String(repeating: "\u{301}", count: 3000) // one character, 6 KB
+        for id in [tenKilobytes, combining] {
+            let quoted = CatalogIdentifier.quoted(id)
+            XCTAssertLessThanOrEqual(quoted.utf8.count, 63, "\(quoted.utf8.count) bytes")
+            XCTAssertTrue(quoted.hasSuffix("..."))
+        }
+        XCTAssertEqual(CatalogIdentifier.quoted("com.short"), "com.short")
+    }
+
     // MARK: Parse -> catalog -> install from the source
 
     func testNoCatalogIDReachesAPathOrTheInstalledApp() async throws {
@@ -75,7 +85,7 @@ final class SecurityCatalogIDTests: XCTestCase {
             if BundleIdentifier.isValid(id) {
                 XCTAssertEqual(call.file.lastPathComponent, "\(id)-1.0.ipa", "a valid id keeps its readable name")
             } else {
-                XCTAssertTrue(call.file.lastPathComponent.range(of: #"^id-[0-9a-f]{16}-1\.0\.ipa$"#, options: .regularExpression) != nil,
+                XCTAssertTrue(call.file.lastPathComponent.range(of: #"^_id-[0-9a-f]{16}-1\.0\.ipa$"#, options: .regularExpression) != nil,
                               "\(id) -> \(call.file.lastPathComponent)")
             }
             XCTAssertEqual(call.options.expectedBundleID, id, "only compared with the IPA's id")
@@ -123,6 +133,10 @@ final class SecurityCatalogIDTests: XCTestCase {
             XCTAssertLessThanOrEqual(candidate.utf8.count + 22, 255, "room for the .part suffix: \(candidate)")
         }
         XCTAssertNotEqual(name("a/b"), name("a_b"), "ids that the old character mapping merged stay apart")
+        let digested = name("a/b")
+        let lookalike = String(digested.dropFirst().dropLast("-1.0.ipa".count)) // "id-<hex>", a valid id
+        XCTAssertTrue(BundleIdentifier.isValid(lookalike), lookalike)
+        XCTAssertNotEqual(name(lookalike), digested, "a valid id shaped like a digest name never shares its file")
         XCTAssertNotEqual(name("x", String(repeating: "1", count: 100)), name("x", String(repeating: "1", count: 101)))
     }
 

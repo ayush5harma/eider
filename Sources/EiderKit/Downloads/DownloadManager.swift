@@ -143,7 +143,8 @@ public actor DownloadManager {
     /// one plain file name, distinct per id and version, that stays under the
     /// 255-byte limit with the `.part` suffix added (155 + 1 + 64 + 4 + 22).
     static func fileName(for app: CatalogApp, version: CatalogVersion) -> String {
-        let id = BundleIdentifier.isValid(app.bundleID) ? app.bundleID : "id-\(digest(app.bundleID))"
+        // "_" cannot start a valid id, so a digest name never meets a real id's name.
+        let id = BundleIdentifier.isValid(app.bundleID) ? app.bundleID : "_id-\(digest(app.bundleID))"
         var number = safe(version.version)
         if number.utf8.count > maxVersionBytes {
             number = "\(number.prefix(keptVersionPrefix))-\(digest(version.version))"

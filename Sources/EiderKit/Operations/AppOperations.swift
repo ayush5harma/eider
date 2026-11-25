@@ -159,8 +159,8 @@ public struct AppOperations: Sendable {
             options.sourceURL = sourceURL
             // A direct address has a made-up id; a catalog entry's id is the app the user chose.
             // It is free text from the source (CatalogIdentifier), so it is only compared with the
-            // IPA's validated id: one the strict check refuses can never match, and such an entry
-            // installs only under the owner's own --bundle-id. It never becomes `options.bundleID`.
+            // IPA's validated id, never used: an entry whose id matches no IPA's id installs only
+            // under the owner's own --bundle-id. It never becomes `options.bundleID`.
             options.expectedBundleID = expectsCatalogID ? app.bundleID : nil
             var mapper = DownloadEventMapper(label: "\(app.name) \(release.version)")
             var file: URL?

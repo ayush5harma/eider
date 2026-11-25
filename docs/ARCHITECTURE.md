@@ -56,18 +56,18 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   id becomes a path (`uninstall`, `open`, `doctor`, `update`). A source's own
   id (`CatalogIdentifier`) is a label for showing and matching only, as other
   clients treat it: it is cleaned by `DisplayText` and capped at 255 bytes,
-  never strictly checked, so it must never be used as one. It is compared with
-  the IPA's id (`expectedBundleID`), names a download file only when it passes
-  the strict check (otherwise a digest stands in, `DownloadManager.fileName`),
-  and is never the installed app's id. Names and versions pass through
-  `DisplayText` at the model boundary.
+  never strictly checked, so it must never be used as one. It is only compared
+  (with the IPA's id as `expectedBundleID`, and with installed ids for updates),
+  names a download file only when it passes the strict check (otherwise a
+  digest stands in, `DownloadManager.fileName`), and is never the installed
+  app's id. Names and versions pass through `DisplayText` at the model boundary.
+- A bundle at the install destination is replaced only if the library recorded
+  it or `force` is set, and the old copy goes to the Trash, never deleted.
 - Catalog parsing is hot (one source in use lists 17,430 apps): dates in the
   common shapes are read by hand (`InternetDate`) before any formatter,
   warning text is built only when a warning is written, and printable ASCII
   skips the Unicode filter. `SourceStore` writes `sources.json` compact and
-  keeps the flattened catalog (`allApps()`) until the list changes. A bundle at the install destination is replaced only if the
-  library recorded it or `force` is set, and the old copy goes to the Trash,
-  never deleted.
+  keeps the flattened catalog (`allApps()`) until the list changes.
 - Errors carry a stable code and a sentence a person can act on. Progress is
   a stream of typed events; the CLI prints them or emits JSON lines, the app
   draws them.
