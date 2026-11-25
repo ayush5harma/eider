@@ -33,6 +33,7 @@ struct InstallOptionsSheet: View {
                         .keyboardShortcut(.cancelAction)
                     Button("Install") { model.confirmPendingInstall(); dismiss() }
                         .keyboardShortcut(.defaultAction)
+                        .primaryActionStyle()
                 }
             }
             .padding(20)
@@ -132,7 +133,7 @@ struct DiagnosisSheet: View {
                     .frame(maxHeight: 160)
                 }
             }
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).primaryActionStyle() }
         }
         .padding(20)
         .frame(width: 520)
@@ -158,7 +159,7 @@ struct ReleaseCheckSheet: View {
                 Text("Could not check").font(.title3.bold())
                 Text(message)
             }
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).primaryActionStyle() }
         }
         .padding(20)
         .frame(width: 420)

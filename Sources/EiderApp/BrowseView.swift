@@ -48,6 +48,7 @@ struct BrowseView: View {
             List(results, selection: $model.selectedAppID) { entry in
                 BrowseRow(model: model, entry: entry).tag(entry.id)
             }
+            .listStyle(.inset)
             .overlay {
                 if results.isEmpty { ContentUnavailableView.search(text: model.filter.text) }
             }
@@ -59,23 +60,24 @@ private struct BrowseRow: View {
     let model: AppModel
     let entry: SourcedApp
 
+    static let iconSide: CGFloat = 40
+
     var body: some View {
-        HStack {
-            // Icons load only in the detail pane: listing must not contact every
-            // source's image host just because the section was opened.
-            RoundedRectangle(cornerRadius: 8)
-                .fill(.quaternary)
-                .frame(width: 36, height: 36)
-                .overlay(Text(String(entry.app.name.prefix(1))).font(.headline).foregroundStyle(.secondary))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading) {
-                Text(entry.app.name).lineLimit(1)
+        HStack(spacing: 12) {
+            // The icon is fetched only while the row is on screen, at most six
+            // at a time, and cancelled when it scrolls away (RemoteImage).
+            RemoteImage(
+                url: entry.app.iconURL, sourceURL: entry.sourceURL,
+                size: CGSize(width: Self.iconSide, height: Self.iconSide), corner: 9, fallback: entry.app.name)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.app.name).font(.body.weight(.medium)).lineLimit(1)
                 Text(entry.app.developerName ?? entry.source.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 6)
             // Looked up here, so only the rows on screen ask.
             StatusTag(status: model.status(of: entry.app))
         }
+        .padding(.vertical, 3)
     }
 }
 
@@ -85,7 +87,7 @@ struct StatusTag: View {
     var body: some View {
         switch status {
         case .notInstalled: EmptyView()
-        case .installed: Text("Installed").font(.caption).foregroundStyle(.secondary)
+        case .installed: Pill(text: "Installed", systemImage: "checkmark")
         case .updateAvailable: UpdateBadge()
         }
     }
