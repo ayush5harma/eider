@@ -56,12 +56,11 @@ final class InstallRun: @unchecked Sendable {
         let machOs = converter.machOFiles()
         guard !machOs.isEmpty else { throw InstallFailure(.noMachO, "No Mach-O binaries were found in the bundle, so there is nothing to convert.") }
         try refuseEncrypted(machOs)
-        let linksOpenGLES = machOs.contains { file in
-            ((try? MachOFiles.readImage(at: file).linkedDylibs()) ?? []).contains { $0.contains("/OpenGLES.framework/") }
-        }
+        // Read before conversion, which rewrites load commands but keeps these.
+        let linkedDylibs = machOs.flatMap { (try? MachOFiles.readImage(at: $0).linkedDylibs()) ?? [] }
         try convert(machOs)
         try editBundle()
-        let linked = try link(openGLES: linksOpenGLES, extras: extras)
+        let linked = try link(linkedDylibs: linkedDylibs, extras: extras)
         try sign(machOs + linked, work: work)
         return try place()
     }
@@ -162,18 +161,13 @@ final class InstallRun: @unchecked Sendable {
         return families.contains(macIdiomFamily) ? families : families + [macIdiomFamily]
     }
 
-    /// Link what the app needs into the main executable, in the legacy order:
-    /// the keychain shim, the OpenGL ES redirect (only for apps that link
-    /// OpenGL ES), the app-group shim (always), then extra libraries.
-    private func link(openGLES: Bool, extras: [(source: URL, name: String)]) throws -> [URL] {
+    /// Link what the app needs into the main executable, in the legacy order
+    /// (`ShimLinker.shimsToLink`), then extra libraries.
+    private func link(linkedDylibs: [String], extras: [(source: URL, name: String)]) throws -> [URL] {
         emit(.link, "Linking helper libraries", 0.66)
         let linker = ShimLinker(app: app, executable: executableURL)
         var added: [URL] = []
-        var wanted: [(Shim, String)] = []
-        if options.keychainShim { wanted.append((.keychain, "the keychain shim")) }
-        if openGLES { wanted.append((.gles, "the OpenGL ES shim")) }
-        wanted.append((.groups, "the app-group shim"))
-        for (shim, label) in wanted {
+        for (shim, label) in ShimLinker.shimsToLink(keychain: options.keychainShim, linkedDylibs: linkedDylibs) {
             added.append(try linker.link(try shims.url(for: shim), as: shim.rawValue, installName: shim.installName, label: label))
         }
         for extra in extras {
