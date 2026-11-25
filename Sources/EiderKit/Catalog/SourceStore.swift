@@ -15,7 +15,14 @@ public actor SourceStore {
 
     private let paths: EiderPaths
     private let fetch: SourceFetch
-    private var cache: [CatalogSource]?
+    /// Every change to the list goes through here, so the flattened catalog built
+    /// from it is dropped at the same moment and can never be stale.
+    private var cache: [CatalogSource]? {
+        didSet { appsCache = nil }
+    }
+    /// `allApps()` serves search, update checks and every catalog lookup; with a
+    /// 17k-app source, rebuilding it per call was the work, not the lookup.
+    private var appsCache: [SourcedApp]?
 
     public init(paths: EiderPaths = EiderPaths(), fetch: @escaping SourceFetch = SourceFetcher.default) {
         self.paths = paths
@@ -73,7 +80,10 @@ public actor SourceStore {
     }
 
     public func allApps() throws -> [SourcedApp] {
-        try current().flatMap { source in source.apps.map { SourcedApp(source: source, app: $0) } }
+        if let appsCache { return appsCache }
+        let apps = try current().flatMap { source in source.apps.map { SourcedApp(source: source, app: $0) } }
+        appsCache = apps
+        return apps
     }
 
     // MARK: Internals

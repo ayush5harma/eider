@@ -107,4 +107,23 @@ final class UpdatesCheckerTests: XCTestCase {
         let updates = UpdateChecker.updates(installed: [installed("1.0", build: "4")], catalog: [catalog(sourceA, [("1.0", "5")])])
         XCTAssertEqual(updates.count, 1)
     }
+
+    /// The batch check indexes the catalog once; it must answer exactly as asking
+    /// for each app on its own does, ties between sources included.
+    func testTheBatchCheckAgreesWithThePerAppCheck() {
+        let ids = ["com.a", "com.b", "com.c", "com.d"]
+        let catalogue = ids.flatMap { id in
+            [catalog(sourceA, [("2.0", "1")], id: id), catalog(sourceB, [("2.0", "1"), ("3.0", "1")], id: id)]
+        } + [catalog(sourceA, [("9.0", "1")], id: "com.other")]
+        let library = [
+            installed("1.0", from: sourceA, id: "com.a"), installed("1.0", from: nil, id: "com.b"),
+            installed("5.0", from: sourceB, id: "com.c"), installed("1.0", from: sourceB, id: "com.d"),
+            installed("1.0", id: "com.missing"),
+        ]
+        let batch = UpdateChecker.updates(installed: library, catalog: catalogue)
+        let single = library.compactMap { UpdateChecker.update(for: $0, in: catalogue) }
+        XCTAssertEqual(batch, single)
+        XCTAssertEqual(batch.map(\.installed.bundleID), ["com.a", "com.b", "com.d"])
+        XCTAssertEqual(batch.map(\.sourceURL), [sourceA, sourceB, sourceB], "origin first, otherwise the newest; ties keep catalog order")
+    }
 }

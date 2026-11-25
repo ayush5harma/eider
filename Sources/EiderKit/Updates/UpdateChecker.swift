@@ -29,11 +29,18 @@ public enum UpdateChecker {
     /// the owner's call to take, not an update. When the origin is unknown or
     /// gone, the newest version across all sources counts.
     public static func updates(installed: [InstalledApp], catalog: [SourcedApp]) -> [AvailableUpdate] {
-        installed.compactMap { update(for: $0, in: catalog) }
+        // One pass over the catalog, not one per installed app: a 17k-app source
+        // times a full library was the cost. Grouping keeps catalog order per id.
+        let byID = Dictionary(grouping: catalog, by: \.app.bundleID)
+        return installed.compactMap { update(for: $0, candidates: byID[$0.bundleID] ?? []) }
     }
 
     public static func update(for app: InstalledApp, in catalog: [SourcedApp]) -> AvailableUpdate? {
-        let candidates = catalog.filter { $0.app.bundleID == app.bundleID }
+        update(for: app, candidates: catalog.filter { $0.app.bundleID == app.bundleID })
+    }
+
+    /// `candidates` are the catalog entries with the app's bundle id, in catalog order.
+    private static func update(for app: InstalledApp, candidates: [SourcedApp]) -> AvailableUpdate? {
         let fromOrigin = candidates.filter { $0.sourceURL == app.sourceURL }
         let pool = fromOrigin.isEmpty ? candidates : fromOrigin
 
