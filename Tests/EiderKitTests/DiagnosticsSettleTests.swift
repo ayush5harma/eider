@@ -45,8 +45,31 @@ final class DiagnosticsSettleTests: XCTestCase {
         XCTAssertEqual(outcome, .neverAppeared)
     }
 
-    func testAProcessStillStartingWhenTheTimeoutEndsIsNotRunning() async {
-        let outcome = await probe(settle: 10).watch(timeout: 0.6, pids: processList(lifetime: 30))
+    /// pid 7 exists from `appearsAfter` seconds from now until `lifetime` seconds after that.
+    private func lateProcessList(appearsAfter: TimeInterval, lifetime: TimeInterval) -> @Sendable () -> [Int32] {
+        let begin = Date().addingTimeInterval(appearsAfter)
+        let end = begin.addingTimeInterval(lifetime)
+        return { Date() >= begin && Date() < end ? [7] : [] }
+    }
+
+    /// The deadline bounds the wait for a process to appear, not the settle: an
+    /// app first seen at 0.8 s of a 1 s timeout is still alive when the timeout
+    /// passes and must end as running once it has stayed up for the settle.
+    func testAProcessFirstSeenJustBeforeTheDeadlineAndStillAliveIsRunning() async {
+        let started = Date()
+        let outcome = await probe(settle: 1).watch(timeout: 1, pids: lateProcessList(appearsAfter: 0.8, lifetime: 60))
+        XCTAssertEqual(outcome, .settled(pid: 7))
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 1.7)   // 0.8 s to appear + 1 s settle
+    }
+
+    func testAProcessFirstSeenLateThatThenDiesIsExitedNotRunning() async {
+        let outcome = await probe(settle: 2).watch(timeout: 1, pids: lateProcessList(appearsAfter: 0.8, lifetime: 0.7))
         XCTAssertEqual(outcome, .exited)
+    }
+
+    func testTheFailureNoteSaysExitedOnlyForAnAppThatWasSeen() {
+        let probe = probe(settle: 8)
+        XCTAssertEqual(probe.failureNote(appeared: true, timeout: 20), "The app started and then exited before it had stayed up for 8 seconds.")
+        XCTAssertEqual(probe.failureNote(appeared: false, timeout: 20), "The app did not start within 20 seconds.")
     }
 }

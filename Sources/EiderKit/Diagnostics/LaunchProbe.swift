@@ -60,29 +60,36 @@ public struct LaunchProbe: Sendable {
 
     enum Watch: Equatable {
         case settled(pid: Int32)
-        /// A process appeared and was gone again before `settle` elapsed, or
-        /// was still starting when `timeout` ran out.
+        /// A process appeared and was gone again before `settle` elapsed.
         case exited
+        /// No process appeared before `timeout` ran out.
         case neverAppeared
     }
 
     /// Polls `pids` until a process has been alive for `settle`, has come and
-    /// gone, or `timeout` runs out. Separate from `launch` so the settle rule
-    /// is tested with a stand-in process list instead of a real app.
+    /// gone, or `timeout` runs out with nothing seen. Separate from `launch` so
+    /// the settle rule is tested with a stand-in process list instead of a real app.
+    ///
+    /// `timeout` bounds the wait for a process to appear. Once one has been
+    /// seen the watch runs on to `firstSeen + settle` even past the deadline
+    /// (that bounds it), because a process first seen at 13 s of a 20 s timeout
+    /// with an 8 s settle is still alive at 20 s and must not be reported as
+    /// exited.
     func watch(timeout: TimeInterval, pids: @Sendable () -> [Int32]) async -> Watch {
         let deadline = Date().addingTimeInterval(timeout)
         var firstSeen: Date?
-        while Date() < deadline {
+        while true {
             if let pid = pids().first {
                 let seen = firstSeen ?? Date()
                 firstSeen = seen
                 if Date().timeIntervalSince(seen) >= settle { return .settled(pid: pid) }
             } else if firstSeen != nil {
                 return .exited
+            } else if Date() >= deadline {
+                return .neverAppeared
             }
             await sleep(Self.pollInterval)
         }
-        return firstSeen == nil ? .neverAppeared : .exited
     }
 
     // MARK: Steps
@@ -110,17 +117,22 @@ public struct LaunchProbe: Sendable {
             diagnosis = classify(log + LaunchEvidence.lines(ofReport: report), app: app, process: process)
         }
         guard diagnosis.code == .unknown else { return diagnosis }
-        let note = appeared
-            ? "The app started and then exited within \(Int(timeout)) seconds."
-            : "The app did not start within \(Int(timeout)) seconds."
-        return LaunchDiagnosis(code: .unknown, summary: diagnosis.summary, evidence: [note] + diagnosis.evidence)
+        return LaunchDiagnosis(code: .unknown, summary: diagnosis.summary, evidence: [failureNote(appeared: appeared, timeout: timeout)] + diagnosis.evidence)
+    }
+
+    /// Only an app that was seen and then died is said to have exited; one that
+    /// was never seen did not start. An app still alive never reaches here.
+    func failureNote(appeared: Bool, timeout: TimeInterval) -> String {
+        appeared
+            ? "The app started and then exited before it had stayed up for \(String(format: "%g", settle)) seconds."
+            : "The app did not start within \(String(format: "%g", timeout)) seconds."
     }
 
     /// The bundle is walked for its binaries only when an exception line is
     /// there to use them on, so an app with thousands of resources does not pay
     /// for the walk on every failed launch.
     private func classify(_ lines: [String], app: InstalledApp, process: String) -> LaunchDiagnosis {
-        let hasException = lines.contains { $0.contains("Terminating app due to uncaught exception") }
+        let hasException = lines.contains { $0.contains(LaunchClassifier.exceptionMarker) }
         let binaries = hasException ? LaunchEvidence.appBinaryNames(inBundle: app.path) : []
         return LaunchClassifier.classify(lines: lines, processName: process, appBinaries: binaries)
     }
