@@ -160,7 +160,9 @@ swift test
 Scripts/build-shims.sh      # compile the shims into build/shims
 Scripts/call-shims.sh       # the CallKit and camera shims, no app or camera needed
 Scripts/engine-e2e.sh       # install engine, judged by effect, 28 checks
-Scripts/e2e.sh              # source, install, update, doctor, uninstall
+Scripts/e2e.sh              # source, install, update, doctor, uninstall;
+                            # EIDER_E2E_CRASH_CHECKS=1 adds the crash
+                            # checks (missing library, throwing tweak), one crash window each
 Scripts/make-app.sh         # assemble and ad hoc sign build/Eider.app
 ```
 

@@ -16,7 +16,16 @@
 # container is emptied (its root belongs to containermanagerd) and only the
 # Trash entries the run itself created are deleted again.
 #
-# Usage: Scripts/e2e.sh
+# The crash checks break the probe on purpose (dyld cannot load ProbeKit; an
+# injected tweak, Scripts/probes/throw.m, throws an uncaught exception), and
+# macOS opens a "quit unexpectedly" / Problem Report window for every such
+# crash: three per run, on the screen of whoever is using the Mac
+# (eight in one evening of agent runs, 2026-11-25). They are skipped unless
+# EIDER_E2E_CRASH_CHECKS=1. Either way the probe's crash reports from the run
+# are deleted again.
+#
+# Usage: Scripts/e2e.sh                             (crash checks skipped)
+#        EIDER_E2E_CRASH_CHECKS=1 Scripts/e2e.sh    (all checks)
 
 set -uo pipefail
 
@@ -28,12 +37,16 @@ LOG="$CONTAINER/Documents/probe.log"
 W=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/eider-e2e-product.XXXXXX")" && pwd -P)
 APP="$W/apps/IPA Probe.app"
 SITE="$W/site"
-PASS=0; FAIL=0; MARK=""; SERVER_PID=""
+PASS=0; FAIL=0; SKIP=0; MARK=""; SERVER_PID=""
+CRASH_CHECKS="${EIDER_E2E_CRASH_CHECKS:-0}"
+# Crash reports newer than this file and carrying the probe's bundle id are the run's own.
+touch "$W/run.start"
 
 ok()    { echo "  PASS  $*"; PASS=$((PASS + 1)); }
 bad()   { echo "  FAIL  $*"; FAIL=$((FAIL + 1)); }
+skip()  { echo "  SKIP  $*"; SKIP=$((SKIP + 1)); }
 check() { local what="$1"; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
-fatal() { bad "$*"; echo "$PASS passed, $FAIL failed"; exit 1; }
+fatal() { bad "$*"; echo "$PASS passed, $FAIL failed, $SKIP skipped"; exit 1; }
 
 # ~/.Trash entries that exist before the run, so only the run's own are removed.
 TRASH_BEFORE="$W/trash.before"
@@ -58,10 +71,31 @@ clean_trash() {
   done
   return 0
 }
+# A report is the run's own when it is newer than the run's start and names the
+# probe: a dyld failure's header carries the bundle id, an uncaught exception's
+# does not but carries the binary's slice_uuid (both measured 2026-11-26).
+# Both kinds are written within the second of the crash, so by cleanup time
+# every report this run caused is on disk.
+PROBE_UUID=""
+record_probe_uuid() {
+  PROBE_UUID=$(xcrun dwarfdump --uuid "$APP/Probe" 2>/dev/null | awk 'NR == 1 { print tolower($2) }')
+}
+clean_crash_reports() {
+  local f header
+  for f in "$HOME/Library/Logs/DiagnosticReports"/Probe-*.ips; do
+    [ -f "$f" ] && [ "$f" -nt "$W/run.start" ] || continue
+    header=$(head -n 1 "$f")
+    case "$header" in
+      *"\"bundleID\":\"$BID\""*) rm -f "$f" ;;
+      *"\"slice_uuid\":\"$PROBE_UUID\""*) [ -n "$PROBE_UUID" ] && rm -f "$f" ;;
+    esac
+  done
+  return 0
+}
 cleanup() {
   quit_probe
   [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null
-  empty_container; clean_trash; rm -rf "$W"
+  empty_container; clean_trash; clean_crash_reports; rm -rf "$W"
 }
 trap cleanup EXIT
 
@@ -71,6 +105,11 @@ echo "Building eider, the shims and the probe ..."
 BIN="$(cd "$ROOT" && swift build --show-bin-path)/eider"
 "$ROOT/Scripts/build-shims.sh" >"$W/shims.log" 2>&1 || { cat "$W/shims.log"; echo "build-shims failed"; exit 2; }
 mkdir -p "$SITE" "$W/v2"
+if [ "$CRASH_CHECKS" = 1 ]; then
+  xcrun clang -target arm64-apple-ios14.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -dynamiclib -fobjc-arc \
+    -framework Foundation -install_name @rpath/throw.dylib -o "$W/throw.dylib" "$ROOT/Scripts/probes/throw.m" \
+    || { echo "could not build the throwing dylib"; exit 2; }
+fi
 "$ROOT/legacy/test/make-probe-ipa.sh" "$SITE/probe-1.ipa" >/dev/null || { echo "could not build the probe (needs Xcode's iOS SDK)"; exit 2; }
 # Version 2 is version 1 with a new version and build, so the update is visible
 # and nothing else differs. The installer signs afresh, so the old seal does not matter.
@@ -147,6 +186,7 @@ check "info shows the app and that it is not installed yet" test "$(jget data.ap
 # ── install version 1 from the catalog ──────────────────────────────────────
 echo "install $BID (version 1)"
 run_json install "$BID" --dest "$W/apps"
+record_probe_uuid
 check "install succeeds" test "$RC" = 0
 check "the result names the installed version" is data.app.version 1.0
 check "download events were reported" grep -q '"phase":"download"' "$W/out"
@@ -206,15 +246,45 @@ echo "doctor"
 run_json doctor "$BID"
 check "doctor on a healthy install exits 0 and reports it running" test "$RC" = 0 -a "$(jget data.running)" = true
 quit_probe
-rm -rf "$APP/Frameworks/ProbeKit.framework"
-run_json doctor "$BID" --timeout 15
-check "doctor on the broken install exits 2" test "$RC" = 2
-check "the diagnosis is a missing library" is data.diagnosis.code library_not_loaded
-check "the error carries the same code with a launch. prefix" is error.code launch.library_not_loaded
-check "the evidence names the framework" grep -q 'ProbeKit' "$W/last.json"
-eider doctor "$BID" --timeout 15 >"$W/out" 2>"$W/err"
-check "the text report prints the sentence and the code on stderr" grep -q '(launch.library_not_loaded)' "$W/err"
-quit_probe
+BROKEN_CHECKS=(
+  "doctor on the broken install exits 2"
+  "the diagnosis is a missing library"
+  "the error carries the same code with a launch. prefix"
+  "the evidence names the framework"
+  "the text report prints the sentence and the code on stderr"
+  "reinstall with the throwing tweak succeeds"
+  "doctor on the throwing install exits 2"
+  "the diagnosis is an uncaught exception"
+  "the summary names the exception and the reason"
+  "the summary names the tweak and its method"
+)
+if [ "$CRASH_CHECKS" = 1 ]; then
+  rm -rf "$APP/Frameworks/ProbeKit.framework"
+  run_json doctor "$BID" --timeout 15
+  check "${BROKEN_CHECKS[0]}" test "$RC" = 2
+  check "${BROKEN_CHECKS[1]}" is data.diagnosis.code library_not_loaded
+  check "${BROKEN_CHECKS[2]}" is error.code launch.library_not_loaded
+  check "${BROKEN_CHECKS[3]}" grep -q 'ProbeKit' "$W/last.json"
+  eider doctor "$BID" --timeout 15 >"$W/out" 2>"$W/err"
+  check "${BROKEN_CHECKS[4]}" grep -q '(launch.library_not_loaded)' "$W/err"
+  quit_probe
+
+  # An injected tweak that throws an uncaught exception 3 s after launch (the
+  # field crash of 2026-11-25): the app outlives the old 2 s settle, so only the
+  # 8 s default catches it, and the log carries the cause. The installer links
+  # an extra dylib as lib<name>.dylib, hence libthrow below.
+  echo "doctor, uncaught exception"
+  run_json install "$BID" --dest "$W/apps" --dylib "$W/throw.dylib"
+  check "${BROKEN_CHECKS[5]}" test "$RC" = 0
+  run_json doctor "$BID" --timeout 20
+  check "${BROKEN_CHECKS[6]}" test "$RC" = 2
+  check "${BROKEN_CHECKS[7]}" is data.diagnosis.code uncaught_exception
+  check "${BROKEN_CHECKS[8]}" grep -q 'NSInvalidArgumentException (\*\*\* -\[NSBundle initWithURL:\]: nil URL argument)' "$W/last.json"
+  check "${BROKEN_CHECKS[9]}" grep -q 'thrown from libthrow.dylib in +\[ThrowingTweak getResourcesBundle\]' "$W/last.json"
+  quit_probe
+else
+  for name in "${BROKEN_CHECKS[@]}"; do skip "$name (crashes the probe; EIDER_E2E_CRASH_CHECKS=1 runs it)"; done
+fi
 
 # ── failures and usage ──────────────────────────────────────────────────────
 echo "exit codes"
@@ -236,5 +306,5 @@ check "a second uninstall fails: nothing to remove" test "$RC" = 2
 run_json source remove "$BASE/source.json"
 check "source remove succeeds" test "$RC" = 0
 
-echo "$PASS passed, $FAIL failed"
+echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" -eq 0 ]
