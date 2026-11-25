@@ -6,7 +6,7 @@ comes as a command line tool, `eider`, and a SwiftUI app, `Eider.app`.
 
 ## Status
 
-Early: version 0.1.2. Apple silicon only, macOS 14 or later. Expect rough
+Early: version 0.1.3. Apple silicon only, macOS 14 or later. Expect rough
 edges; read "What does not work" before installing anything you depend on.
 
 ## Install
@@ -18,7 +18,7 @@ brew tap ayush5harma/eider https://github.com/ayush5harma/eider
 brew install --cask eider
 ```
 
-Or download `Eider-0.1.2.zip` from the project's GitHub releases and move
+Or download `Eider-0.1.3.zip` from the project's GitHub releases and move
 `Eider.app` to `/Applications`. The app bundle carries the CLI at
 `Eider.app/Contents/Resources/cli/bin/eider`; the cask links it onto your PATH.
 
