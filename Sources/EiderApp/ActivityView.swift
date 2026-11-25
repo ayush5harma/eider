@@ -1,6 +1,9 @@
 import EiderKit
 import SwiftUI
 
+/// Installs and updates as the App Store shows downloads: what is running or
+/// waiting on top, each with a ring that fills and stops on a click, and what
+/// finished below.
 struct ActivityView: View {
     let model: AppModel
     let activity: ActivityModel
@@ -9,12 +12,23 @@ struct ActivityView: View {
         Group {
             if activity.items.isEmpty {
                 ContentUnavailableView(
-                    "No activity", systemImage: "arrow.down.circle",
+                    "No Activity", systemImage: "arrow.down.circle",
                     description: Text("Installs and updates appear here while they run."))
             } else {
-                List(activity.items) { item in
-                    ActivityRow(item: item, activity: activity)
-                        .padding(.vertical, 6)
+                // Split once per draw: the list is short, but read it once.
+                let pending = activity.items.filter(\.isPending)
+                let finished = activity.items.filter { !$0.isPending }
+                List {
+                    if !pending.isEmpty {
+                        Section("In Progress") {
+                            ForEach(pending) { ActivityRow(model: model, item: $0, activity: activity) }
+                        }
+                    }
+                    if !finished.isEmpty {
+                        Section("Recent") {
+                            ForEach(finished) { ActivityRow(model: model, item: $0, activity: activity) }
+                        }
+                    }
                 }
                 .listStyle(.inset)
             }
@@ -23,73 +37,113 @@ struct ActivityView: View {
         .toolbar {
             ToolbarItem {
                 Button("Clear Finished") { activity.clearFinished() }
-                    .disabled(activity.items.allSatisfy(\.isRunning))
+                    .disabled(activity.items.allSatisfy(\.isPending))
             }
         }
     }
 }
 
 private struct ActivityRow: View {
+    let model: AppModel
     let item: ActivityItem
     let activity: ActivityModel
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            symbol
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(item.title).font(.headline)
-                    Spacer(minLength: 8)
-                    if item.isRunning {
-                        Text(item.fraction.formatted(.percent.precision(.fractionLength(0))))
-                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                    trailing
-                }
-                switch item.state {
-                case .running:
-                    ProgressView(value: item.fraction)
-                        .progressViewStyle(.linear)
-                        .tint(.accentColor)
-                    Text(progressLine).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                case .failed(let code, let message):
-                    Text(message).foregroundStyle(.red)
-                    Text(code).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                case .succeeded, .upToDate, .cancelled:
-                    Text(item.message).font(.caption).foregroundStyle(.secondary)
-                }
+        HStack(spacing: 14) {
+            icon
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title).font(.headline).lineLimit(1)
+                status
             }
+            Spacer(minLength: 12)
+            trailing
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// The app's icon when the request names a catalog entry or an installed
+    /// app; a symbol tile for a file or an address.
+    @ViewBuilder private var icon: some View {
+        switch item.request {
+        case .catalog(let app, _, let source):
+            CatalogIcon(url: app.iconURL, sourceURL: source.url, name: app.name, side: 44)
+        case .update(let bundleID, let name):
+            if let installed = model.installed.first(where: { $0.bundleID == bundleID }) {
+                InstalledIcon(app: installed, side: 44)
+            } else {
+                SymbolTile(symbol: "arrow.down.app", name: name)
+            }
+        case .url:
+            SymbolTile(symbol: "link", name: "")
+        case .localIPA:
+            SymbolTile(symbol: "doc.zipper", name: "")
         }
     }
 
-    /// Flat circle and symbol: rows scroll, so no glass here.
-    private var symbol: some View {
-        let (name, tint): (String, Color) = switch item.state {
-        case .running: (item.phase == .install ? "shippingbox" : "arrow.down", .accentColor)
-        case .succeeded, .upToDate: ("checkmark", .green)
-        case .cancelled: ("xmark", .secondary)
-        case .failed: ("exclamationmark", .red)
+    @ViewBuilder private var status: some View {
+        switch item.state {
+        case .queued:
+            Text("Waiting").font(.callout).foregroundStyle(.secondary)
+        case .running:
+            VStack(alignment: .leading, spacing: 5) {
+                ProgressView(value: item.fraction)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .frame(maxWidth: 360)
+                Text(progressLine).font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+        case .failed(let code, let message):
+            Text(message).font(.callout).foregroundStyle(.red).lineLimit(3).textSelection(.enabled)
+            Text(code).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+        case .succeeded, .upToDate, .cancelled:
+            Label(item.message, systemImage: doneSymbol)
+                .font(.callout).foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
         }
-        return Image(systemName: name)
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(tint)
-            .frame(width: 30, height: 30)
-            .background(tint.opacity(0.14), in: Circle())
-            .accessibilityHidden(true)
+    }
+
+    private var doneSymbol: String {
+        switch item.state {
+        case .succeeded: return "checkmark.circle.fill"
+        case .upToDate: return "checkmark.circle"
+        default: return "xmark.circle"
+        }
     }
 
     @ViewBuilder private var trailing: some View {
-        if item.isRunning {
-            Button("Cancel") { activity.cancel(item.id) }.rowActionStyle()
-        } else if item.canRetry {
-            Button("Retry") { activity.retry(item.id) }.rowActionStyle()
+        switch item.state {
+        case .running, .queued:
+            Button { activity.cancel(item.id) } label: {
+                ProgressRing(fraction: item.fraction, side: 28, indeterminate: item.state == .queued)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel")
+            .help("Cancel")
+        default:
+            if item.canRetry {
+                Button("Retry") { activity.retry(item.id) }.rowCapsule()
+            }
         }
     }
 
     private var progressLine: String {
         guard item.phase == .download, let received = item.bytesReceived else { return item.message }
-        let done = ByteCountFormatter.string(fromByteCount: received, countStyle: .file)
+        let done = Design.sizeText(received)
         guard let total = item.bytesTotal, total > 0 else { return "\(item.message): \(done)" }
-        return "\(item.message): \(done) of \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))"
+        return "\(done) of \(Design.sizeText(total))"
+    }
+}
+
+/// A flat squircle with a symbol, standing in for an app icon.
+private struct SymbolTile: View {
+    let symbol: String
+    let name: String
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Design.iconCorner(44), style: .continuous)
+            .fill(.quaternary)
+            .overlay(Image(systemName: symbol).font(.title3.weight(.medium)).foregroundStyle(.secondary))
+            .frame(width: 44, height: 44)
+            .accessibilityHidden(true)
     }
 }
