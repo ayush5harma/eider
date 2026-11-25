@@ -103,8 +103,8 @@ public enum LaunchClassifier {
     /// The backtrace frames follow the "Terminating" line (log continuation
     /// lines, or the crash report's "Last Exception Backtrace"), so only that
     /// run of frame lines is searched: it ends at the first line that is not a
-    /// frame, so an unrelated event cannot lend its frame. A crash report's
-    /// "...Backtrace:" header sits between them and is skipped. A crash report
+    /// frame, so an unrelated event cannot lend its frame. A short preamble
+    /// before the first frame is skipped (see `maxLinesBeforeFrames`). A crash report
     /// saved as .ips keeps its frames as JSON objects, not text, so it yields the
     /// exception but no "thrown from".
     ///
@@ -130,10 +130,22 @@ public enum LaunchClassifier {
         return LaunchDiagnosis(code: .uncaughtException, summary: summary, evidence: evidence(evidenceLines))
     }
 
+    /// Lines allowed between the Terminating line and the first frame:
+    /// NSException's own "*** First throw call stack:" and "(" in the unified
+    /// log (field log of 2026-11-25), or a crash report's "...Backtrace:"
+    /// header. Once frames have started, the first non-frame line ends them.
+    private static let maxLinesBeforeFrames = 3
+
     private static func appFrame(after index: Int, in lines: [String], binaries: Set<String>) -> (image: String, symbol: String, line: String)? {
+        var framesStarted = false
+        var linesBeforeFrames = 0
         for line in lines[(index + 1)...] {
-            if line.hasSuffix("Backtrace:") { continue }
-            guard let match = captures(framePattern, in: line), let image = match[0] else { return nil }
+            guard let match = captures(framePattern, in: line), let image = match[0] else {
+                linesBeforeFrames += 1
+                if framesStarted || linesBeforeFrames > maxLinesBeforeFrames { return nil }
+                continue
+            }
+            framesStarted = true
             if binaries.contains(image) { return (image, (match.count > 1 ? match[1] : nil) ?? "", line) }
         }
         return nil
