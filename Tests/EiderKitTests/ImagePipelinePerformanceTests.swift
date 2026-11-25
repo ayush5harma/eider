@@ -62,8 +62,10 @@ final class ImagePipelinePerformanceTests: XCTestCase {
         XCTAssertEqual(decoded, Self.decodes)
         print("IMAGE-PERF \(Self.decodes) fetch+downsample to 72 px: \(batch) ms")
         print("IMAGE-PERF main-actor heartbeat (1 ms sleeps): idle \(idle.ticks) ticks, longest gap \(idle.gap) ms; while decoding \(loaded.ticks) ticks, longest gap \(loaded.gap) ms")
-        // Decoding 120 icons on the main actor would hold it for 120 x ~10 ms.
-        XCTAssertLessThan(loaded.gap, 50, "the main actor was held while images decoded")
+        // Decoding 120 icons on the main actor would hold it for 120 x ~10 ms,
+        // over a second. Measured off it: 12 ms alone, 39 ms once inside the
+        // full suite with every core busy, so the bound leaves room for that.
+        XCTAssertLessThan(loaded.gap, 200, "the main actor was held while images decoded")
     }
 
     /// Runs `work` while a main-actor task sleeps 1 ms at a time, and returns

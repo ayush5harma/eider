@@ -63,7 +63,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Building Eider.app ..."
-"$ROOT/Scripts/make-app.sh" --configuration debug --output "$W/bundle" >"$W/make-app.log" 2>&1 \
+# The bench measures what the owner runs, so it builds release; the smoke
+# pictures keep the faster debug build.
+CONFIGURATION=debug
+[ -n "$BENCH" ] && CONFIGURATION=release
+"$ROOT/Scripts/make-app.sh" --configuration "$CONFIGURATION" --output "$W/bundle" >"$W/make-app.log" 2>&1 \
   || { cat "$W/make-app.log"; echo "make-app.sh failed"; exit 2; }
 [ -x "$EXE" ] || { echo "no executable at $EXE"; exit 2; }
 
