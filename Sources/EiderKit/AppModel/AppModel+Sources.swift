@@ -1,5 +1,12 @@
 import Foundation
 
+extension CatalogSource {
+    /// The Sources tab's button: "1 warning", "18 warnings".
+    public var warningsLabel: String {
+        warnings.count == 1 ? "1 warning" : "\(warnings.count) warnings"
+    }
+}
+
 extension AppModel {
     public var selectedSource: CatalogSource? {
         selectedSourceURL.flatMap { url in sources.first { $0.url == url } }

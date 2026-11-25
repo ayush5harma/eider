@@ -96,7 +96,7 @@ private struct SourceRow: View {
             Text("Refreshed \(source.fetchedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption).foregroundStyle(.secondary)
             if !source.warnings.isEmpty {
-                Button("\(source.warnings.count) warnings", action: showWarnings)
+                Button(source.warningsLabel, action: showWarnings)
                     .buttonStyle(.link)
             }
         }
