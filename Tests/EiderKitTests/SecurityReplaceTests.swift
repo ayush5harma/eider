@@ -39,16 +39,25 @@ final class SecurityReplaceTests: XCTestCase {
         throw XCTSkip("unreachable")
     }
 
-    // MARK: The IPA must be the app the catalog named
+    // MARK: An IPA with another id than the catalog listed installs as its own id
 
-    func testAnIPAWithAnotherBundleIDIsRefusedBeforeAnythingIsTouched() async throws {
+    func testAnIPAWithAnotherBundleIDGoesOnUnderItsOwnIDWithAWarning() async throws {
+        // Past the check the fake binary fails at the Mach-O stage: that is the evidence.
         let scratch = try EngineScratch()
         let destination = scratch.url("apps")
         let options = InstallOptions(destination: destination, expectedBundleID: "com.listed.app")
-        let refusal = try await failure(scratch, try ipa(scratch, shipping: "com.victim.app"), options)
-        XCTAssertEqual(refusal.code, .bundleIDMismatch, refusal.message)
-        XCTAssertTrue(refusal.message.contains("com.listed.app") && refusal.message.contains("com.victim.app"), refusal.message)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        let warnings = WarningLog()
+        do {
+            _ = try await installer(scratch).install(ipa: try ipa(scratch, shipping: "com.other.app"), options: options) { event in
+                if event.step == .warning { warnings.add(event.message) }
+            }
+            XCTFail("expected the Mach-O stage to refuse the fake binary")
+        } catch let failure as InstallFailure {
+            XCTAssertEqual(failure.code, .noMachO, failure.message)
+        }
+        let warning = warnings.all.first { $0.contains("com.listed.app") }
+        XCTAssertNotNil(warning, "\(warnings.all)")
+        XCTAssertTrue(warning?.contains("installing it as com.other.app") == true, warning ?? "")
     }
 
     func testTheExpectedIDOrTheExplicitOverrideGetsPastTheCheck() async throws {
@@ -150,4 +159,11 @@ final class TrashLog: @unchecked Sendable {
         try? FileManager.default.moveItem(at: url, to: moved)
         return moved
     }
+}
+
+private final class WarningLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+    var all: [String] { lock.withLock { messages } }
+    func add(_ message: String) { lock.withLock { messages.append(message) } }
 }

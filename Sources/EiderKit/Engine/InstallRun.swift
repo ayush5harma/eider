@@ -88,15 +88,15 @@ final class InstallRun: @unchecked Sendable {
         emit(.validate, "\(identity.name) (\(identity.bundleID)), executable \(identity.executable), iOS \(identity.minimumOS ?? "?")+", 0.22)
     }
 
-    /// A catalog entry names the app it offers. An IPA that ships another id is not
-    /// that app, and installing it could replace one the user has; the override is
-    /// the user's explicit word that this IPA's id is the one they want.
+    /// A catalog entry's id is a listing key, not a promise: real sources list
+    /// entries such as "cypwn.AppCake+.7.2.2" whose IPA ships another id, and
+    /// refusing them (0.1.1) made those entries uninstallable while Feather
+    /// installs them. The app is installed under its own id (or the override),
+    /// with a warning naming both. What still guards the user's apps: AppPlacer
+    /// replaces a bundle at the destination only when Eider placed it.
     private func checkExpectedBundleID() throws {
         guard let expected = options.expectedBundleID, identity.shippedID != expected, identity.shippedID != options.bundleID else { return }
-        throw InstallFailure(
-            .bundleIDMismatch,
-            "The source lists \(expected), but this IPA is \(identity.shippedID). Nothing was installed. If you trust it, install it again with --bundle-id \(identity.shippedID)."
-        )
+        emit(.warning, "The source lists \(expected), but this IPA is \(identity.shippedID); installing it as \(identity.bundleID).", 0.21)
     }
 
     /// App extensions are a frequent reason a sideloaded app fails to launch or
