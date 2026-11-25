@@ -6,13 +6,13 @@ struct LibraryView: View {
     @Bindable var model: AppModel
     @State private var uninstalling: InstalledApp?
 
-    private let columns = [GridItem(.adaptive(minimum: 180, maximum: 230), spacing: 18)]
+    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 22, alignment: .top)]
 
     var body: some View {
         Group {
             if model.installed.isEmpty {
                 ContentUnavailableView {
-                    Label("No apps installed", systemImage: "square.grid.2x2")
+                    Label("No Apps Installed", systemImage: "square.grid.2x2")
                 } description: {
                     Text("Find an app in Browse, or drop an .ipa file on this window.")
                 } actions: {
@@ -21,16 +21,20 @@ struct LibraryView: View {
                 }
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 18) {
-                        ForEach(model.installed) { app in
-                            LibraryCell(model: model, app: app) { uninstalling = app }
+                    VStack(alignment: .leading, spacing: 22) {
+                        if !model.updates.isEmpty { updatesBanner }
+                        LazyVGrid(columns: columns, spacing: 30) {
+                            ForEach(model.installed) { app in
+                                LibraryCell(model: model, app: app) { uninstalling = app }
+                            }
                         }
                     }
-                    .padding(24)
+                    .padding(.horizontal, Design.pagePadding).padding(.vertical, 26)
                 }
             }
         }
         .navigationTitle("Library")
+        .navigationSubtitle(model.installed.count == 1 ? "1 app" : "\(model.installed.count) apps")
         .toolbar {
             ToolbarItem {
                 Button { chooseIPAFile(model) } label: {
@@ -41,37 +45,59 @@ struct LibraryView: View {
         }
         .sheet(item: $uninstalling) { app in UninstallSheet(model: model, app: app) }
     }
+
+    /// One line pointing at the Updates page, as the App Store's account page does.
+    private var updatesBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.down.app.fill")
+                .font(.title2).foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.updates.count == 1 ? "1 update available" : "\(model.updates.count) updates available")
+                    .font(.headline)
+                Text("Newer versions are waiting in your sources.").font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button("Show Updates") { model.selection = .updates }.rowCapsule()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .cardBackground(cornerRadius: 14)
+    }
 }
 
-/// A plain card, not glass: the grid scrolls, and the tiles are drawn as
-/// opaque fills with a hairline so a large library scrolls without a blur pass
-/// per tile.
+/// An icon, a name and one action, as the App Store's purchased-apps grid
+/// draws them: no card and no glass, so a large library scrolls cheaply.
 private struct LibraryCell: View {
     let model: AppModel
     let app: InstalledApp
     let uninstall: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path.path))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 72, height: 72)
-                .accessibilityHidden(true)
-                .padding(.top, 4)
-            VStack(spacing: 3) {
+        let hasUpdate = model.hasUpdate(app)
+        VStack(spacing: 10) {
+            InstalledIcon(app: app, side: 96)
+                .overlay(alignment: .topTrailing) {
+                    if hasUpdate {
+                        Circle().fill(Color.accentColor)
+                            .frame(width: 16, height: 16)
+                            .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 2.5))
+                            .offset(x: -2, y: 4)
+                            .accessibilityHidden(true)
+                    }
+                }
+            VStack(spacing: 4) {
                 Text(app.name).font(.headline).lineLimit(1)
                 HStack(spacing: 6) {
-                    Text("Version \(app.version)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    if model.hasUpdate(app) { UpdateBadge() }
+                    Text(app.version.isEmpty ? "Installed" : "Version \(app.version)")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                    if hasUpdate { UpdateBadge() }
                 }
             }
             HStack(spacing: 6) {
-                Button("Open") { NSWorkspace.shared.open(app.path) }
-                    .buttonStyle(.bordered)
-                if model.hasUpdate(app) {
-                    Button("Update") { model.update(app) }
-                        .buttonStyle(.borderedProminent)
+                if hasUpdate {
+                    Button("Update") { model.update(app) }.rowCapsule(prominent: true)
+                } else {
+                    Button("Open") { NSWorkspace.shared.open(app.path) }.rowCapsule()
                 }
                 Menu {
                     actions
@@ -81,16 +107,14 @@ private struct LibraryCell: View {
                 .menuStyle(.button)
                 .menuIndicator(.hidden)
                 .buttonStyle(.bordered)
+                .buttonBorderShape(.circle)
                 .fixedSize()
                 .accessibilityLabel("More actions for \(app.name)")
             }
-            .buttonBorderShape(.capsule)
             .controlSize(.small)
-            .padding(.top, 2)
         }
-        .padding(.vertical, 16).padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
-        .cardBackground(cornerRadius: 16)
+        .contentShape(Rectangle())
         .contextMenu { actions }
     }
 
@@ -122,8 +146,13 @@ private struct UninstallSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Uninstall \(app.name)?").font(.title3.bold())
-            Text("The app is moved to the Trash.")
+            HStack(spacing: 14) {
+                InstalledIcon(app: app, side: 56)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Uninstall \(app.name)?").font(.title3.bold())
+                    Text("The app is moved to the Trash.").foregroundStyle(.secondary)
+                }
+            }
             Toggle("Also remove its data", isOn: $removeData)
             HStack {
                 Spacer()

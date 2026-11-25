@@ -142,7 +142,7 @@ cat >"$W/site/source.json" <<'JSON'
   "subtitle":"Notes that sync across your devices","iconURL":"art/icon0.png",
   "localizedDescription":"Write, sketch and organise notes in a calm, focused space. Aurora Notes keeps everything in sync and works offline.\n\nThis entry is a fixture for the app's smoke test.",
   "screenshotURLs":["art/shot0.png","art/shot1.png","art/shot2.png"],
-  "versions":[{"version":"3.2","buildVersion":"32","downloadURL":"https://example.invalid/aurora-3.2.ipa","date":"2026-11-12","size":48234496,
+  "category":"productivity","versions":[{"version":"3.2","buildVersion":"32","downloadURL":"https://example.invalid/aurora-3.2.ipa","date":"2026-11-12","size":48234496,"minOSVersion":"15.0",
                "localizedDescription":"Faster search and a new sidebar."},
               {"version":"3.1","buildVersion":"31","downloadURL":"https://example.invalid/aurora-3.1.ipa","date":"2026-09-30","size":47185920},
               {"version":"3.0","buildVersion":"30","downloadURL":"https://example.invalid/aurora-3.0.ipa","date":"2026-08-01","size":46137344}]},
@@ -156,7 +156,8 @@ cat >"$W/site/source.json" <<'JSON'
   "versions":[{"version":"1.0","downloadURL":"https://example.invalid/field.ipa"}]},
  {"name":"IPA Probe","bundleIdentifier":"local.ipa-install-on-mac.probe","developerName":"Eider tests","iconURL":"art/icon5.png",
   "localizedDescription":"A tiny app used to test the installer.",
-  "versions":[{"version":"2.0","buildVersion":"2","downloadURL":"https://example.invalid/probe-2.ipa","date":"2026-11-01"},
+  "versions":[{"version":"2.0","buildVersion":"2","downloadURL":"https://example.invalid/probe-2.ipa","date":"2026-11-01","size":2411724,
+               "localizedDescription":"Checks the camera and the keychain at launch.\nFixes a crash when the window closes.\nThe probe now reports its own version."},
               {"version":"1.0","buildVersion":"1","downloadURL":"https://example.invalid/probe-1.ipa"}]},
  {"name":"Nimbus Weather","bundleIdentifier":"com.example.nimbus","developerName":"Skyline","iconURL":"art/icon6.png",
   "versions":[{"version":"4.0","downloadURL":"https://example.invalid/nimbus.ipa"}]},
@@ -226,8 +227,8 @@ echo "Checking the result"
 check "the app quit and no process is left" test -z "$(pgrep -f "$EXE")"
 check "the snapshot status says ok" test "$(cat "$SNAP/snapshot.status" 2>/dev/null)" = ok
 check "the app never became the frontmost application" test "$STOLE_FOCUS" = 0
-for name in library browse activity sources browse-detail browse-update \
-            library-dark browse-dark activity-dark sources-dark browse-detail-dark browse-update-dark; do
+for name in library updates browse activity sources browse-detail browse-update \
+            library-dark updates-dark browse-dark activity-dark sources-dark browse-detail-dark browse-update-dark; do
   file="$SNAP/$name.png"
   if [ ! -f "$file" ]; then bad "$name.png exists"; continue; fi
   size=$(stat -f %z "$file")
