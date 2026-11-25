@@ -129,11 +129,30 @@ public actor DownloadManager {
         return file.appendingPathExtension(digest).appendingPathExtension("part")
     }
 
-    /// Bundle id and version come from the source, so they are reduced to a safe
-    /// alphabet before they become part of a file name.
     private func destination(_ app: CatalogApp, _ version: CatalogVersion) -> URL {
-        let name = "\(Self.safe(app.bundleID))-\(Self.safe(version.version)).ipa"
-        return paths.downloads.appendingPathComponent(name)
+        paths.downloads.appendingPathComponent(Self.fileName(for: app, version: version))
+    }
+
+    private static let maxVersionBytes = 64
+    private static let keptVersionPrefix = 32
+
+    /// Bundle id and version come from the source. A source's id is free text
+    /// (`CatalogIdentifier`), so it names the file only when it passes the strict
+    /// bundle-id check; any other id ("a+b~c", "../x", 10 KB of text) is replaced
+    /// by a digest of it. A long version keeps a prefix and a digest. The result is
+    /// one plain file name, distinct per id and version, that stays under the
+    /// 255-byte limit with the `.part` suffix added (155 + 1 + 64 + 4 + 22).
+    static func fileName(for app: CatalogApp, version: CatalogVersion) -> String {
+        let id = BundleIdentifier.isValid(app.bundleID) ? app.bundleID : "id-\(digest(app.bundleID))"
+        var number = safe(version.version)
+        if number.utf8.count > maxVersionBytes {
+            number = "\(number.prefix(keptVersionPrefix))-\(digest(version.version))"
+        }
+        return "\(id)-\(number).ipa"
+    }
+
+    private static func digest(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func safe(_ text: String) -> String {

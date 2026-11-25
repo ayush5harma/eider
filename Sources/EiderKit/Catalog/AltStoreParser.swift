@@ -39,17 +39,18 @@ enum AltStoreParser {
     private static func parseApp(_ item: JSONDict, index: Int, context: inout ParseContext) -> CatalogApp? {
         // A name that is nothing but invisible characters is still a name the source gave:
         // the app is listed under its bundle id rather than skipped.
-        let bundleID = item.string("bundleIdentifier")
+        // The id is the source's label for the app, kept as given (see CatalogIdentifier).
+        let bundleID = CatalogIdentifier.cleaned(item.string("bundleIdentifier"))
         let name = item.displayName("name") ?? (item.string("name") != nil ? bundleID : nil)
         // Built only when a line is written: 17k entries in one source made the eager
         // string a measurable share of the parse.
-        let label = { "app #\(index) (\(bundleID ?? name ?? "unnamed"))" }
+        let label = { "app #\(index) (\(bundleID.map(CatalogIdentifier.quoted) ?? name ?? "unnamed"))" }
         guard let bundleID else {
             context.warn("\(label()): no bundle identifier, skipped")
             return nil
         }
-        guard BundleIdentifier.isValid(bundleID) else {
-            context.warn("\(label()): not a valid bundle identifier, skipped")
+        guard !CatalogIdentifier.isTooLong(bundleID) else {
+            context.warn("\(label()): bundle identifier longer than \(CatalogIdentifier.maxBytes) bytes, skipped")
             return nil
         }
         guard let name else {

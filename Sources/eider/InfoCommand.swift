@@ -16,7 +16,9 @@ struct InfoCommand: AsyncParsableCommand {
         let installed: InstalledApp?
     }
 
-    func validate() throws { try requireBundleID(bundleID) }
+    /// Only looked up: in the sources by their own id, and in the library, whose
+    /// entries are all strictly valid ids, by string comparison.
+    func validate() throws { try requireCatalogID(bundleID) }
 
     func run() async throws {
         try await common.guarded { output in

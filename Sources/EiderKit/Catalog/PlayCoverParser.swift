@@ -30,14 +30,16 @@ enum PlayCoverParser {
     }
 
     private static func parseApp(_ item: JSONDict, index: Int, context: inout ParseContext) -> CatalogApp? {
-        let name = item.displayName("name") ?? (item.string("name") != nil ? item.string("bundleID", "bundleId") : nil)
-        let label = { "entry #\(index) (\(item.string("bundleID", "bundleId") ?? name ?? "unnamed"))" }
-        guard let bundleID = item.string("bundleID", "bundleId") else {
+        // The id is the source's label for the app, kept as given (see CatalogIdentifier).
+        let bundleID = CatalogIdentifier.cleaned(item.string("bundleID", "bundleId"))
+        let name = item.displayName("name") ?? (item.string("name") != nil ? bundleID : nil)
+        let label = { "entry #\(index) (\(bundleID.map(CatalogIdentifier.quoted) ?? name ?? "unnamed"))" }
+        guard let bundleID else {
             context.warn("\(label()): no bundle id, skipped")
             return nil
         }
-        guard BundleIdentifier.isValid(bundleID) else {
-            context.warn("\(label()): not a valid bundle id, skipped")
+        guard !CatalogIdentifier.isTooLong(bundleID) else {
+            context.warn("\(label()): bundle id longer than \(CatalogIdentifier.maxBytes) bytes, skipped")
             return nil
         }
         guard let name else {
