@@ -32,25 +32,50 @@ struct SnapshotRunner {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let window = try await waitForWindow()
-            // cacheDisplay renders a dark-mode window with the hosting view's
-            // light background under light text (measured: white on white), so
-            // the pictures are always drawn in the light appearance.
-            window.appearance = NSAppearance(named: .aqua)
             try await fit(window)
             try await Task.sleep(for: Self.firstLayout)
             await model.reload()
-            for section in SidebarSection.allCases {
-                model.selection = section
-                try await write(window, named: section.rawValue)
+            // Light pictures keep their old names; the dark set gets a suffix.
+            // Painting the window background in the window's own appearance
+            // (render below) is what makes the dark set legible.
+            for (appearance, suffix) in [(NSAppearance.Name.aqua, ""), (.darkAqua, "-dark")] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                window.appearance = NSAppearance(named: appearance)
+                try await writePages(window, suffix: suffix)
             }
-            model.selection = .browse
-            await model.settleBrowse()
-            model.selectedAppID = model.browseResults.first?.id
-            try await write(window, named: "browse-detail")
+            if let steps = Self.scrollBenchSteps {
+                window.appearance = NSAppearance(named: .aqua)
+                try await ScrollBench(model: model, window: window, steps: steps).run(writingTo: directory)
+            }
             try finish("ok")
         } catch {
             try? finish("failed: \(error)")
         }
+    }
+
+    private func writePages(_ window: NSWindow, suffix: String) async throws {
+        model.selectedAppID = nil
+        for section in SidebarSection.allCases {
+            model.selection = section
+            try await write(window, named: section.rawValue + suffix)
+        }
+        model.selection = .browse
+        await model.settleBrowse()
+        model.selectedAppID = model.browseResults.first?.id
+        try await write(window, named: "browse-detail" + suffix)
+        // An app with an update shows the status pill and the version list.
+        if let update = model.browseResults.first(where: {
+            if case .updateAvailable = model.status(of: $0.app) { return true } else { return false }
+        }) {
+            model.selectedAppID = update.id
+            try await write(window, named: "browse-update" + suffix)
+        }
+    }
+
+    /// `EIDER_SCROLL_BENCH=<frames>`: after the pictures, scroll Browse that
+    /// many frames and record the main-thread cost of each (ScrollBench).
+    private static var scrollBenchSteps: Int? {
+        ProcessInfo.processInfo.environment["EIDER_SCROLL_BENCH"].flatMap(Int.init).map { max(1, $0) }
     }
 
     private func waitForWindow() async throws -> NSWindow {
@@ -66,7 +91,10 @@ struct SnapshotRunner {
         try await fit(window)
         try await Task.sleep(for: Self.settle)
         window.contentView?.layoutSubtreeIfNeeded()
-        guard let view = window.contentView, let page = Self.render(view, in: window) else { throw SnapshotError.cannotRender(name) }
+        // The frame view, not the content view: the toolbar with its search
+        // field and source picker is part of what the pictures are for.
+        guard let view = window.contentView?.superview ?? window.contentView,
+              let page = Self.render(view, in: window) else { throw SnapshotError.cannotRender(name) }
         guard let png = page.representation(using: .png, properties: [:]) else { throw SnapshotError.cannotRender(name) }
         try png.write(to: directory.appendingPathComponent("\(name).png"), options: .atomic)
     }
