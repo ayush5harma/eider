@@ -6,6 +6,10 @@ public enum Shim: String, CaseIterable, Sendable {
     case keychain = "libipakeychain.dylib"
     case gles = "libipagles.dylib"
     case groups = "libipagroups.dylib"
+    /// Answers an app's own "use CallKit for this call?" checks with no.
+    case callKit = "libipacallkit.dylib"
+    /// Keeps camera frame-rate requests inside what the active format supports.
+    case camera = "libipacamera.dylib"
     /// Empty library that stands in for a keychain-fix tweak.
     case neutralised = "libipaneutralised.dylib"
 

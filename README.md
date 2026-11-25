@@ -99,8 +99,8 @@ shell installer this came from and the measurements behind the steps.
 
 ### The shims
 
-An ad hoc signature gets no keychain, no app groups and no usable OpenGL, so
-three small libraries are linked in (built by `Scripts/build-shims.sh`):
+An ad hoc signature gets no keychain, no app groups, no usable OpenGL and no
+CallKit, so small libraries are linked in (built by `Scripts/build-shims.sh`):
 
 - keychain: an emulated keychain stored in the app's container, so a sign-in
   survives a relaunch (`--no-keychain` opts out).
@@ -108,6 +108,15 @@ three small libraries are linked in (built by `Scripts/build-shims.sh`):
   OpenGL, for apps that link OpenGL ES.
 - app groups: a writable app-group folder inside the app's own container,
   because macOS denies an ad hoc signed app its real ones.
+- CallKit: CallKit keys its clients by an application identifier an ad hoc
+  signature cannot carry, so the system refuses the app's call provider and
+  crashes when a call is placed. For apps that link CallKit, the app's own
+  "use CallKit for this call?" checks answer no, so an app with its own call
+  path (WhatsApp) takes it. An app with no such fallback gains nothing.
+- camera: for apps that link AVFoundation, a requested frame rate outside what
+  the active camera format supports is moved to the nearest supported one
+  (iPhone-style variable rates against a fixed 30 fps Mac webcam otherwise
+  crash the app at the first video frame).
 
 A bundled "keychain fix" tweak library is replaced by an empty one so it
 cannot defeat the keychain shim.
@@ -149,7 +158,8 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 swift build
 swift test
 Scripts/build-shims.sh      # compile the shims into build/shims
-Scripts/engine-e2e.sh       # install engine, judged by effect, 26 checks
+Scripts/call-shims.sh       # the CallKit and camera shims, no app or camera needed
+Scripts/engine-e2e.sh       # install engine, judged by effect, 28 checks
 Scripts/e2e.sh              # source, install, update, doctor, uninstall
 Scripts/make-app.sh         # assemble and ad hoc sign build/Eider.app
 ```
