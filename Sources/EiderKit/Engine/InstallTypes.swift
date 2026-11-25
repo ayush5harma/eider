@@ -29,7 +29,8 @@ public struct InstallFailure: Error, Sendable, Equatable, LocalizedError, Custom
         case encrypted, noArm64Slice, noMachO, machOEdit
         case missingShim, signingFailed, verificationFailed
         case destinationUnusable, destinationConflict, placementFailed
-        /// The IPA is not the app the catalog entry named.
+        /// The IPA is not the app the catalog entry named. Not raised since 0.1.2
+        /// (a mismatch is now a warning); kept because codes are a stable contract.
         case bundleIDMismatch
         /// The previous copy could not be moved to the Trash, so it was left alone.
         case trashUnavailable

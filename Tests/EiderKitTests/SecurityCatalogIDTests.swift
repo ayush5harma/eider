@@ -142,7 +142,7 @@ final class SecurityCatalogIDTests: XCTestCase {
 
     // MARK: The engine
 
-    func testTheEngineRefusesAnIPAThatIsNotTheOddIDAndTheOverrideIsTheOnlyWayPast() async throws {
+    func testAnOddCatalogIDNeverBecomesTheInstalledIDOrAPath() async throws {
         let scratch = try EngineScratch()
         let ipa = scratch.url("thing.ipa")
         let plist = """
@@ -160,14 +160,21 @@ final class SecurityCatalogIDTests: XCTestCase {
         let installer = Installer(paths: EiderPaths(home: scratch.url("home")), shims: shims)
         let destination = scratch.url("apps")
 
+        // Since 0.1.2 a listed id that the IPA does not ship is a warning, not a
+        // refusal: the install goes on under the IPA's own id. The odd id only
+        // ever appears in that warning; past the check the fake binary fails at
+        // the Mach-O stage, before anything is placed.
         for odd in ["a+b~c", "../../x", "a/b", "."] {
+            let warnings = OddIDWarnings()
             do {
-                _ = try await installer.install(ipa: ipa, options: InstallOptions(destination: destination, expectedBundleID: odd))
-                XCTFail("\(odd): expected a refusal")
+                _ = try await installer.install(ipa: ipa, options: InstallOptions(destination: destination, expectedBundleID: odd)) { event in
+                    if event.step == .warning { warnings.add(event.message) }
+                }
+                XCTFail("\(odd): expected the Mach-O stage to refuse the fake binary")
             } catch let failure as InstallFailure {
-                XCTAssertEqual(failure.code, .bundleIDMismatch, failure.message)
-                XCTAssertTrue(failure.message.contains("--bundle-id com.real.app"), failure.message)
+                XCTAssertEqual(failure.code, .noMachO, failure.message)
             }
+            XCTAssertTrue(warnings.all.contains { $0.contains("installing it as com.real.app") }, "\(odd): \(warnings.all)")
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path), odd)
         }
         // Past the check the fake binary fails at the Mach-O stage: that is the evidence.
@@ -187,4 +194,11 @@ private final class InstallCalls: @unchecked Sendable {
     var all: [(file: URL, options: InstallOptions)] { lock.withLock { calls } }
     var last: (file: URL, options: InstallOptions)? { all.last }
     func record(_ file: URL, _ options: InstallOptions) { lock.withLock { calls.append((file, options)) } }
+}
+
+private final class OddIDWarnings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+    var all: [String] { lock.withLock { messages } }
+    func add(_ message: String) { lock.withLock { messages.append(message) } }
 }
