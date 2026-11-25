@@ -70,6 +70,33 @@ A JSON array, or an object `{"name": ..., "data": [...]}`, of entries:
 `bundleID`, `name`, `version` and `link` are required. `itunesLookup` is
 accepted and never fetched. `checksum` is optional.
 
+## One app, several entries
+
+Some sources list the same app once per version (one in use has 17,430
+entries for 3,597 bundle ids). Eider merges entries that share a bundle id
+within one source into a single app, when the source is read and again when a
+saved copy is loaded, so the browse list has one row per app:
+
+- The app's versions are the union of every entry's versions, newest first.
+  The same version at the same download URL is listed once; the same version
+  at another URL is kept as another download.
+- Newest means the highest version number. A dotted number ("1.10", "v2.0",
+  "3.8.14 (5)") is compared component by component, so 1.10 is newer than 1.9
+  and 1.2 equals 1.2.0. A version that is not one ("8b6e503", "nightly",
+  "beta") has no order against another such version and never outranks a
+  numbered one, so a commit-hash build is not offered as an update to 3.8.14.
+  Ties go to the build number (when both give one), then to the date (a version
+  with no date ranks below a dated one), then to the order in the source. Dates
+  decide last because sources date their versions unreliably.
+- Name, developer, subtitle, description, icon, tint, category and screenshots
+  come from the entry carrying the newest version; a field it leaves empty is
+  taken from the first other entry that has one. Notes, size, date, sha256 and
+  the download URL stay with their own version.
+- Entries with different names but one bundle id are still one app.
+- Different sources are never merged; the same bundle id in two sources is
+  two rows. Merging is not a warning; `eider source add` prints how many
+  entries were listed.
+
 ## Checksums
 
 `sha256` (AltStore format) and `checksum` (PlayCover list) are optional. When

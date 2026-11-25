@@ -65,6 +65,6 @@ public enum UpdateChecker {
     }
 
     private static func isNewer(_ lhs: CatalogVersion, than rhs: CatalogVersion) -> Bool {
-        AppVersion.isNewer(version: lhs.version, build: lhs.build, than: rhs.version, build: rhs.build)
+        lhs.ranksAbove(rhs)
     }
 }

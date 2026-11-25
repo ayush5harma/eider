@@ -81,12 +81,29 @@ public actor SourceStore {
 
     public func allApps() throws -> [SourcedApp] {
         if let appsCache { return appsCache }
-        let apps = try current().flatMap { source in source.apps.map { SourcedApp(source: source, app: $0) } }
+        var taken = Set<String>()
+        var apps: [SourcedApp] = []
+        for source in try current() {
+            for app in source.apps {
+                let sourced = SourcedApp(source: source, app: app)
+                apps.append(taken.insert(sourced.id).inserted ? sourced : Self.uniquely(sourced, among: &taken))
+            }
+        }
         appsCache = apps
         return apps
     }
 
     // MARK: Internals
+
+    /// Rows and lookups are keyed by `SourcedApp.id`. Merging makes it unique within
+    /// a source, so this only runs for a hand-edited file that lists one address
+    /// twice (or a bundle id holding the "|" separator): the later copy gets "#2",
+    /// "#3", ... in list order, so the same file always yields the same ids.
+    private static func uniquely(_ sourced: SourcedApp, among taken: inout Set<String>) -> SourcedApp {
+        var number = 2
+        while !taken.insert("\(sourced.id)#\(number)").inserted { number += 1 }
+        return SourcedApp(source: sourced.source, app: sourced.app, id: "\(sourced.id)#\(number)")
+    }
 
     private static func load(_ url: URL, using fetch: SourceFetch) async throws -> CatalogSource {
         guard URLPolicy.isAllowed(url, allowFile: true, allowLoopback: true) else {
@@ -142,7 +159,9 @@ public actor SourceStore {
         }
         if data.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) { return [] }
         do {
-            return try Self.decoder.decode(FileContents.self, from: data).sources
+            // A copy saved before entries were merged is merged here, in memory;
+            // the file is rewritten at the next change.
+            return try Self.decoder.decode(FileContents.self, from: data).sources.map(CatalogMerge.normalized)
         } catch {
             throw CatalogFailure.storeUnreadable("not valid JSON")
         }

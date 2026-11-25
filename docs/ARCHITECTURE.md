@@ -75,7 +75,15 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   app's id. Names and versions pass through `DisplayText` at the model boundary.
 - A bundle at the install destination is replaced only if the library recorded
   it or `force` is set, and the old copy goes to the Trash, never deleted.
-- Catalog parsing is hot (one source in use lists 17,430 apps): dates in the
+- Entries sharing a bundle id within a source are merged into one `CatalogApp`
+  (`CatalogMerge`, called by `SourceParser.parse` and when `SourceStore` loads a
+  copy saved before merging), so `SourcedApp.id` ("<source url>|<bundle id>") is
+  unique per source; `allApps()` suffixes `#2`, `#3` should a hand-edited file
+  still collide. "Newest version" is one rule, `CatalogVersion.ranksAbove`, used
+  by the merged order, installs and `UpdateChecker`: numeric versions by number,
+  never a hash or label above a number, date only as a late tie-break
+  (docs/SOURCES.md).
+- Catalog parsing is hot (one source in use lists 17,430 entries): dates in the
   common shapes are read by hand (`InternetDate`) before any formatter,
   warning text is built only when a warning is written, and printable ASCII
   skips the Unicode filter. `SourceStore` writes `sources.json` compact and

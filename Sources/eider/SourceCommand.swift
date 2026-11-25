@@ -16,6 +16,8 @@ struct SourceSummary: Encodable {
     let name: String
     let format: String
     let apps: Int
+    /// Entries the document listed, present only when some shared a bundle id and were merged.
+    let entries: Int?
     let fetchedAt: Date
     let warnings: [String]
 
@@ -24,6 +26,7 @@ struct SourceSummary: Encodable {
         name = source.name
         format = source.format.rawValue
         apps = source.apps.count
+        entries = source.entryCount
         fetchedAt = source.fetchedAt
         warnings = source.warnings
     }
