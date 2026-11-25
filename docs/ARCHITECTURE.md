@@ -21,7 +21,7 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
 | `Catalog/` | source formats and the source list | `CatalogSource`, `CatalogApp`, `CatalogVersion`, `SourceParser`, `SourceStore` |
 | `Downloads/` | fetching IPAs | `DownloadManager`, `DownloadEvent` |
 | `Updates/` | installed version against catalog version | `UpdateChecker` |
-| `Diagnostics/` | why an installed app did not launch | `LaunchProbe`, `LaunchDiagnosis` |
+| `Diagnostics/` | why an installed app did not launch | `LaunchProbe`, `LaunchDiagnosis`, `LaunchClassifier` |
 
 ## Rules every module follows
 
@@ -51,6 +51,13 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
 - Errors carry a stable code and a sentence a person can act on. Progress is
   a stream of typed events; the CLI prints them or emits JSON lines, the app
   draws them.
+- A launch is judged "running" only after the process has stayed up for
+  `LaunchProbe.defaultSettle` (8 s; `--settle` on `open` and `doctor`). The
+  `LaunchDiagnosis.Code` strings are a stable contract: add, never rename.
+  `LaunchClassifier` is a pure function over log and crash-report lines and
+  checks `uncaught_exception` first (an exception line proves the app ran past
+  dyld and code signing); it is given the Mach-O file names in the bundle so
+  the summary can name the binary whose frame threw.
 - No code is copied from Feather, PlayCover or PlayTools (GPL and AGPL); this
   repository is MIT.
 

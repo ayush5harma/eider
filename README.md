@@ -44,6 +44,7 @@ eider list                                         # installed apps, updates mar
 eider update --all                                 # or: eider update <bundle-id>
 eider open com.example.app                         # launch and confirm it stays up
 eider doctor com.example.app                       # launch; if it dies, say why
+eider doctor com.example.app --settle 15           # an app that fails late
 eider uninstall com.example.app --remove-data      # to the Trash
 ```
 
@@ -52,6 +53,13 @@ Useful `install` options: `--dest <folder>` (default `/Applications`),
 `--remove-extensions`, `--reset` (clear saved data first; the app must be
 quit) and `--force`. The argument is treated as a file only when it contains
 a slash or ends in `.ipa`; otherwise it is a bundle id.
+
+`open` and `doctor` count an app as running once it has stayed up for 8
+seconds (`--settle <seconds>`, which must be less than `--timeout`, default
+20). An app that dies sooner gets a diagnosis with a stable code, such as
+`launch.uncaught_exception` (an Objective-C exception, with the exception,
+its reason and the app binary that threw it), `launch.library_not_loaded` or
+`launch.system_policy`.
 
 Sources can be in the AltStore or the PlayCover format; see
 [docs/SOURCES.md](docs/SOURCES.md). Eider ships no sources.
