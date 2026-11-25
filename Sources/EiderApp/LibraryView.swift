@@ -6,7 +6,7 @@ struct LibraryView: View {
     @Bindable var model: AppModel
     @State private var uninstalling: InstalledApp?
 
-    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 220), spacing: 16)]
+    private let columns = [GridItem(.adaptive(minimum: 180, maximum: 230), spacing: 18)]
 
     var body: some View {
         Group {
@@ -21,55 +21,76 @@ struct LibraryView: View {
                 }
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
+                    LazyVGrid(columns: columns, spacing: 18) {
                         ForEach(model.installed) { app in
                             LibraryCell(model: model, app: app) { uninstalling = app }
                         }
                     }
-                    .padding(20)
+                    .padding(24)
                 }
             }
         }
         .navigationTitle("Library")
+        .toolbar {
+            ToolbarItem {
+                Button { chooseIPAFile(model) } label: {
+                    Label("Install IPA...", systemImage: "plus")
+                }
+                .help("Install an .ipa file from disk (Command-O)")
+            }
+        }
         .sheet(item: $uninstalling) { app in UninstallSheet(model: model, app: app) }
     }
 }
 
+/// A plain card, not glass: the grid scrolls, and the tiles are drawn as
+/// opaque fills with a hairline so a large library scrolls without a blur pass
+/// per tile.
 private struct LibraryCell: View {
     let model: AppModel
     let app: InstalledApp
     let uninstall: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: app.path.path))
                 .resizable()
-                .frame(width: 64, height: 64)
+                .interpolation(.high)
+                .frame(width: 72, height: 72)
                 .accessibilityHidden(true)
-            Text(app.name).font(.headline).lineLimit(1)
-            HStack(spacing: 6) {
-                Text("Version \(app.version)").font(.caption).foregroundStyle(.secondary)
-                if model.hasUpdate(app) { UpdateBadge() }
+                .padding(.top, 4)
+            VStack(spacing: 3) {
+                Text(app.name).font(.headline).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text("Version \(app.version)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    if model.hasUpdate(app) { UpdateBadge() }
+                }
             }
-            HStack {
+            HStack(spacing: 6) {
                 Button("Open") { NSWorkspace.shared.open(app.path) }
+                    .buttonStyle(.bordered)
                 if model.hasUpdate(app) {
                     Button("Update") { model.update(app) }
+                        .buttonStyle(.borderedProminent)
                 }
                 Menu {
                     actions
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "ellipsis")
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .buttonStyle(.bordered)
                 .fixedSize()
                 .accessibilityLabel("More actions for \(app.name)")
             }
+            .buttonBorderShape(.capsule)
             .controlSize(.small)
+            .padding(.top, 2)
         }
-        .padding(12)
+        .padding(.vertical, 16).padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .cardBackground(cornerRadius: 16)
         .contextMenu { actions }
     }
 
@@ -86,8 +107,8 @@ private struct LibraryCell: View {
 struct UpdateBadge: View {
     var body: some View {
         Text("Update")
-            .font(.caption2.bold())
-            .padding(.horizontal, 6).padding(.vertical, 2)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 7).padding(.vertical, 2)
             .background(Color.accentColor, in: Capsule())
             .foregroundStyle(.white)
     }
