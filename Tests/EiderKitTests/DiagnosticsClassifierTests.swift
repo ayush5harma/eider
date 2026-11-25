@@ -95,9 +95,14 @@ final class DiagnosticsClassifierTests: XCTestCase {
 
     /// `log show --style compact` for the process that crashed in the 2026-11-25
     /// field report: a tweak dylib injected into the IPA, a missing resource bundle.
+    /// Unfiltered: NSException puts "*** First throw call stack:" and "(" between
+    /// the Terminating line and the first frame (re-read from the log 2026-11-26
+    /// after a fixture without them let a frame search that gave up on them pass).
     private static let exceptionLog = [
         "2026-11-25 23:49:16.617 Df Telegram[32403:314a77] (CoreFoundation) something unrelated",
         "2026-11-25 23:49:20.471 Df Telegram[32403:314a77] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: '*** -[NSBundle initWithURL:]: nil URL argument'",
+        "*** First throw call stack:",
+        "(",
         "\t0   CoreFoundation                      0x00000001996d680c __exceptionPreprocess + 176",
         "\t1   libobjc.A.dylib                     0x00000001952d85ec objc_exception_throw + 88",
         "\t2   Foundation                          0x0000000195bb9328 -[NSBundle _initUniqueWithURL:] + 0",
@@ -222,6 +227,18 @@ final class DiagnosticsClassifierTests: XCTestCase {
         ]
         let diagnosis = classify(lines, process: "Telegram", binaries: ["nicegram-BlackScreenFIX.dylib"])
         XCTAssertEqual(diagnosis.summary, "The app stopped on an uncaught NSGenericException (boom).")
+    }
+
+    func testOnlyAShortPreambleMaySitBeforeTheFirstFrame() {
+        let frame = "5   nicegram-BlackScreenFIX.dylib       0x0000000101118d64 +[FCAlertView getResourcesBundle] + 176"
+        let terminating = "*** Terminating app due to uncaught exception 'NSGenericException', reason: 'boom'"
+        let preamble = ["*** First throw call stack:", "("]
+        let found = classify([terminating] + preamble + [frame], process: "Telegram", binaries: ["nicegram-BlackScreenFIX.dylib"])
+        XCTAssertTrue(found.summary.contains("thrown from nicegram-BlackScreenFIX.dylib"))
+
+        let unrelated = (1...4).map { "2026-11-25 23:49:21.00\($0) Df Telegram[32403:1] an unrelated event" }
+        let tooFar = classify([terminating] + unrelated + [frame], process: "Telegram", binaries: ["nicegram-BlackScreenFIX.dylib"])
+        XCTAssertEqual(tooFar.summary, "The app stopped on an uncaught NSGenericException (boom).")
     }
 
     func testACrashReportsBacktraceHeaderDoesNotEndTheFrameSearch() {
