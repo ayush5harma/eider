@@ -114,7 +114,7 @@ struct DiagnosisSheet: View {
                 EmptyView()
             case .running(let name):
                 Text("Diagnosing \(name)").font(.title3.bold())
-                ProgressView("Opening the app and watching what happens...")
+                ProgressView("Opening the app and watching it for several seconds...")
             case .finished(let name, .running(let pid)):
                 Text("\(name) is running").font(.title3.bold())
                 Text("It stayed up after opening (process \(pid)). Nothing to fix.")
