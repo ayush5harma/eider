@@ -78,6 +78,33 @@ final class DiagnosticsEvidenceTests: XCTestCase {
         XCTAssertEqual(LaunchEvidence.appBinaryNames(inBundle: scratch.url("missing")), [])
     }
 
+    /// An app bug thrown through the camera shim's AVFoundation wrapper must not
+    /// read "thrown from libipacamera.dylib": the shim is Eider's, not the app's.
+    func testEidersShimsAreNotTheAppsBinariesAndTheNextAppFrameIsNamed() throws {
+        let scratch = try EngineScratch()
+        let app = scratch.url("Probe.app")
+        let frameworks = app.appendingPathComponent("Frameworks", isDirectory: true)
+        try FileManager.default.createDirectory(at: frameworks, withIntermediateDirectories: true)
+        let machO = Data([0xCF, 0xFA, 0xED, 0xFE]) + Data(repeating: 0, count: 28)
+        try machO.write(to: app.appendingPathComponent("Probe"))
+        for shim in Shim.allCases { try machO.write(to: frameworks.appendingPathComponent(shim.rawValue)) }
+
+        let binaries = LaunchEvidence.appBinaryNames(inBundle: app)
+        XCTAssertEqual(binaries, ["Probe"])
+
+        let lines = [
+            "*** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: 'format not supported'",
+            "0   CoreFoundation                      0x00000001996d680c __exceptionPreprocess + 176",
+            "1   libipacamera.dylib                  0x0000000102a00000 ipa_setActiveVideoMinFrameDuration + 80",
+            "2   Probe                               0x0000000100001234 -[CameraController start] + 120",
+        ]
+        let diagnosis = LaunchClassifier.classify(lines: lines, processName: "Probe", appBinaries: binaries)
+        XCTAssertEqual(
+            diagnosis.summary,
+            "The app stopped on an uncaught NSInvalidArgumentException (format not supported), thrown from Probe in -[CameraController start].")
+        XCTAssertFalse(diagnosis.summary.contains("libipacamera"))
+    }
+
     func testReportTextIsCapped() throws {
         let scratch = try EngineScratch()
         let file = scratch.url("big.ips")

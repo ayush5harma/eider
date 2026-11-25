@@ -37,7 +37,13 @@ enum LaunchEvidence {
     /// executable, frameworks, dylibs, extensions), which is how a backtrace
     /// frame is told apart as the app's own code rather than the system's.
     /// Only the first bytes of each file are read (`MachOFiles.kind`).
+    ///
+    /// Eider's own shims are left out: they are linked into the app, but a
+    /// frame inside one (the camera shim wraps AVFoundation setters) is a
+    /// wrapper the app's own bug was thrown through, not the app's code, and
+    /// naming it would blame Eider's library for the app's bug.
     static func appBinaryNames(inBundle bundle: URL) -> Set<String> {
+        let shims = Set(Shim.allCases.map(\.rawValue))
         let keys: [URLResourceKey] = [.isRegularFileKey]
         guard let walker = FileManager.default.enumerator(at: bundle, includingPropertiesForKeys: keys) else { return [] }
         var names = Set<String>()
@@ -46,7 +52,7 @@ enum LaunchEvidence {
                   MachOFiles.kind(of: file) != .notMachO else { continue }
             names.insert(file.lastPathComponent)
         }
-        return names
+        return names.subtracting(shims)
     }
 
     /// `log show --start` takes local time, "yyyy-MM-dd HH:mm:ss".

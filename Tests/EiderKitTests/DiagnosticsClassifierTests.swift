@@ -169,4 +169,73 @@ final class DiagnosticsClassifierTests: XCTestCase {
         let diagnosis = classify(Array(Self.exceptionLog.dropFirst(2)), process: "Telegram", binaries: ["nicegram-BlackScreenFIX.dylib"])
         XCTAssertEqual(diagnosis.code, .unknown)
     }
+
+    // MARK: Uncaught exceptions: the denial that may be behind them
+
+    func testAnExceptionKeepsFirstPlaceButNamesASandboxDenialLoggedForTheSameProcess() {
+        let denial = "2026-11-25 23:49:19.900 Df kernel[0:1] (Sandbox) Sandbox: Telegram(32403) deny(1) mach-lookup com.apple.foo"
+        let diagnosis = classify([denial] + Self.exceptionLog, process: "Telegram", binaries: ["nicegram-BlackScreenFIX.dylib"])
+        XCTAssertEqual(diagnosis.code, .uncaughtException)
+        XCTAssertTrue(diagnosis.summary.hasPrefix("The app stopped on an uncaught NSInvalidArgumentException"), diagnosis.summary)
+        XCTAssertTrue(diagnosis.summary.contains("sandbox refused something"), diagnosis.summary)
+        XCTAssertEqual(diagnosis.evidence.count, 3)
+        XCTAssertTrue(diagnosis.evidence[0].contains("Terminating app"))
+        XCTAssertTrue(diagnosis.evidence[1].contains("nicegram-BlackScreenFIX.dylib"))
+        XCTAssertEqual(diagnosis.evidence[2], denial)
+    }
+
+    func testAnExceptionNamesSystemPolicyAndKeychainDenialsToo() {
+        let policy = classify(
+            ["kernel: (Sandbox) System Policy: Telegram(32403) deny(1) file-write-create /Users/a/Library/Group Containers/g"] + Self.exceptionLog,
+            process: "Telegram")
+        XCTAssertEqual(policy.code, .uncaughtException)
+        XCTAssertTrue(policy.summary.contains("System Policy"), policy.summary)
+
+        let keychain = classify(["Telegram SecItemAdd failed: -34018"] + Self.exceptionLog, process: "Telegram")
+        XCTAssertEqual(keychain.code, .uncaughtException)
+        XCTAssertTrue(keychain.summary.contains("--no-keychain"), keychain.summary)
+    }
+
+    func testAnotherProcessesDenialIsNotAddedToAnException() {
+        let diagnosis = classify(["kernel: (Sandbox) Sandbox: Safari(11) deny(1) mach-lookup x"] + Self.exceptionLog, process: "Telegram")
+        XCTAssertFalse(diagnosis.summary.contains("sandbox"), diagnosis.summary)
+        XCTAssertEqual(diagnosis.evidence.count, 1)
+    }
+
+    // MARK: Uncaught exceptions: what is read out of the lines
+
+    func testExceptionNameAndReasonAreStrippedOfControlCharactersAndCapped() {
+        let reason = "bad\u{1B}[31m thing" + String(repeating: "x", count: 1000)
+        let diagnosis = classify(["*** Terminating app due to uncaught exception 'NS\u{7}Err', reason: '\(reason)'"])
+        XCTAssertEqual(diagnosis.code, .uncaughtException)
+        XCTAssertFalse(diagnosis.summary.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }, diagnosis.summary)
+        XCTAssertTrue(diagnosis.summary.contains("NSErr"))
+        XCTAssertLessThan(diagnosis.summary.count, LaunchClassifier.maxEvidenceWidth + 100)
+    }
+
+    func testTheFrameSearchStopsAtTheFirstLineThatIsNotABacktraceFrame() {
+        let lines = [
+            "*** Terminating app due to uncaught exception 'NSGenericException', reason: 'boom'",
+            "1   Foundation                         0x0000000195b00bf8 -[NSBundle initWithURL:] + 36",
+            "2026-11-25 23:49:21.000 Df Telegram[32403:1] an unrelated event",
+            "5   nicegram-BlackScreenFIX.dylib       0x0000000101118d64 +[FCAlertView getResourcesBundle] + 176",
+        ]
+        let diagnosis = classify(lines, process: "Telegram", binaries: ["nicegram-BlackScreenFIX.dylib"])
+        XCTAssertEqual(diagnosis.summary, "The app stopped on an uncaught NSGenericException (boom).")
+    }
+
+    func testACrashReportsBacktraceHeaderDoesNotEndTheFrameSearch() {
+        let lines = [
+            "*** Terminating app due to uncaught exception 'NSGenericException', reason: 'boom'",
+            "Last Exception Backtrace:",
+            "0   CoreFoundation                      0x00000001996d680c __exceptionPreprocess + 176",
+            "1   nicegram-BlackScreenFIX.dylib       0x0000000101118d64 +[FCAlertView getResourcesBundle] + 176",
+        ]
+        let diagnosis = classify(lines, binaries: ["nicegram-BlackScreenFIX.dylib"])
+        XCTAssertTrue(diagnosis.summary.contains("thrown from nicegram-BlackScreenFIX.dylib"), diagnosis.summary)
+    }
+
+    func testTheMarkerIsSharedWithTheProbe() {
+        XCTAssertEqual(LaunchClassifier.exceptionMarker, "Terminating app due to uncaught exception")
+    }
 }
