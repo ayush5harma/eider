@@ -73,15 +73,24 @@ public struct InstallOptions: Codable, Sendable, Equatable {
     /// source lists. The IPA must ship that id (or the `bundleID` override), so a
     /// source cannot hand over an IPA that replaces some other app.
     public var expectedBundleID: String?
+    /// Per invocation, recorded on the library entry rather than in its options:
+    /// the source and listed entry a catalog install came from.
+    public var origin: InstallOrigin?
+    /// Per invocation, never recorded: an update must land on this installed
+    /// app. An IPA whose final id differs would be placed as a second app, so
+    /// the install stops before placing anything.
+    public var replacingBundleID: String?
 
     /// The options without what belongs to one invocation: `force`,
-    /// `resetData` and `expectedBundleID`. The library records this, so an `update`
+    /// `resetData`, `expectedBundleID`, `origin` and `replacingBundleID`. The library records this, so an `update`
     /// never replays a forced or data-wiping install.
     public var withoutPerInvocationFlags: InstallOptions {
         var copy = self
         copy.force = false
         copy.resetData = false
         copy.expectedBundleID = nil
+        copy.origin = nil
+        copy.replacingBundleID = nil
         return copy
     }
 

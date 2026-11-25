@@ -81,6 +81,7 @@ final class InstallRun: @unchecked Sendable {
         plist = try InfoPlist(url: app.appendingPathComponent("Info.plist"))
         identity = try BundleIdentity(plist: plist, options: options)
         try checkExpectedBundleID()
+        try checkReplacedBundleID()
         guard FileManager.default.fileExists(atPath: app.appendingPathComponent(identity.executable).path) else {
             throw InstallFailure(.badBundle, "The executable \(identity.executable) is not in the bundle.")
         }
@@ -97,6 +98,15 @@ final class InstallRun: @unchecked Sendable {
     private func checkExpectedBundleID() throws {
         guard let expected = options.expectedBundleID, identity.shippedID != expected, identity.shippedID != options.bundleID else { return }
         emit(.warning, "The source lists \(expected), but this IPA is \(identity.shippedID); installing it as \(identity.bundleID).", 0.21)
+    }
+
+    /// An update replaces the installed app or nothing: an IPA that now ships
+    /// another id would otherwise be placed beside it as a second app.
+    private func checkReplacedBundleID() throws {
+        guard let replacing = options.replacingBundleID, identity.bundleID != replacing else { return }
+        throw InstallFailure(
+            .bundleIDMismatch,
+            "This update is \(identity.bundleID), but the installed app is \(replacing); nothing was changed. Install it separately if you want both.")
     }
 
     /// App extensions are a frequent reason a sideloaded app fails to launch or
@@ -217,7 +227,7 @@ final class InstallRun: @unchecked Sendable {
             bundleID: identity.bundleID, name: identity.name,
             version: plist.string("CFBundleShortVersionString").map(DisplayText.sanitized) ?? "",
             build: plist.string("CFBundleVersion").map(DisplayText.sanitized) ?? "",
-            path: target, sourceURL: options.sourceURL, ipaSHA256: options.ipaSHA256, options: options
+            path: target, sourceURL: options.sourceURL, origin: options.origin, ipaSHA256: options.ipaSHA256, options: options
         )
     }
 }
