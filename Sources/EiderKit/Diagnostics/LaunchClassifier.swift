@@ -10,8 +10,18 @@ public enum LaunchClassifier {
     /// Rules in priority order: a crash cause outranks the denials that are
     /// logged alongside it on most launches. `processName` scopes the kernel's
     /// System Policy and Sandbox lines, which name the process that was refused.
-    public static func classify(lines rawLines: [String], processName: String?) -> LaunchDiagnosis {
+    /// `appBinaries` is the set of Mach-O file names inside the installed bundle;
+    /// it lets an uncaught exception say which of the app's own binaries threw.
+    public static func classify(lines rawLines: [String], processName: String?, appBinaries: Set<String> = []) -> LaunchDiagnosis {
         let lines = expand(rawLines)
+        // First, ahead of every dyld, AMFI and denial rule: a process that
+        // logged "Terminating app due to uncaught exception" got past dyld and
+        // code signing and ran app code, so those cannot be why it died, while
+        // the keyword rules below match substrings that a running app also logs
+        // for benign reasons (a handled -34018, a denied read, a dlopen that
+        // failed and was caught). An app killed by AMFI or dyld never reaches
+        // the exception machinery, so it has no such line.
+        if let diagnosis = uncaughtException(in: lines, appBinaries: appBinaries) { return diagnosis }
         if let hit = first(lines, matching: ["FairPlay", "cryptid", "file is encrypted", "binary is encrypted"]) {
             return LaunchDiagnosis(
                 code: .encryptedBinary,
@@ -64,6 +74,48 @@ public enum LaunchClassifier {
             code: .unknown,
             summary: "The app did not stay running and the logs do not say why; the last relevant lines are listed below.",
             evidence: evidence(Array((relevant.isEmpty ? lines : relevant).suffix(maxEvidenceLines))))
+    }
+
+    // MARK: Uncaught exceptions
+
+    private static let exceptionMarker = "Terminating app due to uncaught exception"
+    private static let exceptionPattern = try! NSRegularExpression(
+        pattern: #"Terminating app due to uncaught exception '([^']+)'(?:, reason: '(.*)')?"#)
+    /// A symbolicated backtrace line: index, image name (which may hold
+    /// spaces), 0x address, then the symbol with its "+ offset".
+    private static let framePattern = try! NSRegularExpression(
+        pattern: #"^\d+\s+(.+?)\s+0x[0-9a-fA-F]+\s+(.*?)(?:\s+\+\s+\d+)?$"#)
+
+    /// The backtrace frames follow the "Terminating" line (log continuation
+    /// lines, or the crash report's "Last Exception Backtrace"), so only lines
+    /// after it are searched. A crash report saved as .ips keeps its frames as
+    /// JSON objects, not text, so it yields the exception but no "thrown from".
+    private static func uncaughtException(in lines: [String], appBinaries: Set<String>) -> LaunchDiagnosis? {
+        guard let index = lines.firstIndex(where: { $0.contains(exceptionMarker) }),
+              let match = captures(exceptionPattern, in: lines[index]) else { return nil }
+        let name = match[0] ?? "exception"
+        var summary = "The app stopped on an uncaught \(name)"
+        if match.count > 1, let reason = match[1], !reason.isEmpty { summary += " (\(reason))" }
+        var evidenceLines = [lines[index]]
+        if let frame = lines[(index + 1)...].lazy.compactMap({ appFrame(in: $0, binaries: appBinaries) }).first {
+            summary += ", thrown from \(frame.image)"
+            if !frame.symbol.isEmpty, !frame.symbol.hasPrefix("0x") { summary += " in \(frame.symbol)" }
+            evidenceLines.append(frame.line)
+        }
+        return LaunchDiagnosis(code: .uncaughtException, summary: summary + ".", evidence: evidence(evidenceLines))
+    }
+
+    private static func appFrame(in line: String, binaries: Set<String>) -> (image: String, symbol: String, line: String)? {
+        guard let match = captures(framePattern, in: line), let image = match[0], binaries.contains(image) else { return nil }
+        return (image, (match.count > 1 ? match[1] : nil) ?? "", line)
+    }
+
+    /// The capture groups of the first match; nil for a group that did not take part.
+    private static func captures(_ regex: NSRegularExpression, in line: String) -> [String?]? {
+        guard let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else { return nil }
+        return (1..<match.numberOfRanges).map { group in
+            Range(match.range(at: group), in: line).map { String(line[$0]) }
+        }
     }
 
     // MARK: Internals

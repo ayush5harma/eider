@@ -18,6 +18,9 @@ public struct LaunchDiagnosis: Codable, Sendable, Equatable {
         case invalidSignature = "invalid_signature"
         /// FairPlay-encrypted binary.
         case encryptedBinary = "encrypted_binary"
+        /// "Terminating app due to uncaught exception": the app's own code (or a
+        /// tweak injected into it) threw an Objective-C exception.
+        case uncaughtException = "uncaught_exception"
         /// `open` itself refused, before any process existed.
         case openFailed = "open_failed"
         case unknown
