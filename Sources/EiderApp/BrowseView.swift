@@ -43,19 +43,21 @@ struct BrowseView: View {
                 Button("Go to Sources") { model.selection = .sources }
             }
         } else {
-            List(model.browseResults, selection: $model.selectedAppID) { entry in
-                BrowseRow(entry: entry, status: model.status(of: entry.app)).tag(entry.id)
+            // Read once: a body that read the property twice paid for it twice.
+            let results = model.browseResults
+            List(results, selection: $model.selectedAppID) { entry in
+                BrowseRow(model: model, entry: entry).tag(entry.id)
             }
             .overlay {
-                if model.browseResults.isEmpty { ContentUnavailableView.search(text: model.filter.text) }
+                if results.isEmpty { ContentUnavailableView.search(text: model.filter.text) }
             }
         }
     }
 }
 
 private struct BrowseRow: View {
+    let model: AppModel
     let entry: SourcedApp
-    let status: InstallStatus
 
     var body: some View {
         HStack {
@@ -71,7 +73,8 @@ private struct BrowseRow: View {
                 Text(entry.app.developerName ?? entry.source.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            StatusTag(status: status)
+            // Looked up here, so only the rows on screen ask.
+            StatusTag(status: model.status(of: entry.app))
         }
     }
 }

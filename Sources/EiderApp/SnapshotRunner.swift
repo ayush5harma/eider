@@ -44,6 +44,7 @@ struct SnapshotRunner {
                 try await write(window, named: section.rawValue)
             }
             model.selection = .browse
+            await model.settleBrowse()
             model.selectedAppID = model.browseResults.first?.id
             try await write(window, named: "browse-detail")
             try finish("ok")

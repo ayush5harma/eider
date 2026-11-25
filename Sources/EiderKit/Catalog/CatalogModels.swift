@@ -138,6 +138,15 @@ public struct CatalogSource: Codable, Sendable, Hashable {
 public struct SourcedApp: Sendable, Hashable {
     public let source: CatalogSource
     public let app: CatalogApp
+    /// Built once here: it was a computed string, so every comparison, every
+    /// selection lookup and every List diff over a 17,000-app catalog allocated one.
+    public let id: String
 
     public var sourceURL: URL { source.url }
+
+    public init(source: CatalogSource, app: CatalogApp) {
+        self.source = source
+        self.app = app
+        self.id = "\(source.url.absoluteString)|\(app.bundleID)"
+    }
 }
