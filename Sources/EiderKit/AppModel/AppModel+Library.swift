@@ -34,22 +34,6 @@ extension AppModel {
 
     // MARK: Browse
 
-    public var browseResults: [SourcedApp] {
-        filter.apply(to: catalog)
-    }
-
-    public var selectedEntry: SourcedApp? {
-        selectedAppID.flatMap { id in catalog.first { $0.id == id } }
-    }
-
-    public func status(of app: CatalogApp) -> InstallStatus {
-        guard let local = installed.first(where: { $0.bundleID == app.bundleID }) else { return .notInstalled }
-        if let update = updates[app.bundleID] {
-            return .updateAvailable(from: local.version, to: update.version.version)
-        }
-        return .installed(version: local.version)
-    }
-
     /// The sentence under the Install button. The download module records the
     /// first SHA-256 it sees for an address and refuses a different file later.
     public func integrityNote(for version: CatalogVersion) -> String {

@@ -10,19 +10,23 @@ final class StubBackend: AppBackend, @unchecked Sendable {
     private let lock = NSLock()
     private var attempts = 0
     private var diagnosisResult = LaunchResult.running(pid: 1)
+    private var catalogResult: [SourcedApp] = []
+    private var installedResult: [InstalledApp] = []
     let script: Script
 
     init(script: @escaping Script = { _, _, _ in nil }) { self.script = script }
 
-    func installedApps() async throws -> [InstalledApp] { [] }
+    func installedApps() async throws -> [InstalledApp] { lock.withLock { installedResult } }
     func availableUpdates() async throws -> [AvailableUpdate] { [] }
-    func catalog() async throws -> [SourcedApp] { [] }
+    func catalog() async throws -> [SourcedApp] { lock.withLock { catalogResult } }
     func sources() async throws -> [CatalogSource] { [] }
     func addSource(_ url: URL) async throws -> CatalogSource { throw CancellationError() }
     func removeSource(_ url: URL) async throws {}
     func refreshAllSources() async throws -> [SourceRefreshResult] { [] }
     func uninstall(bundleID: String, removeData: Bool) async throws {}
     func diagnose(_ app: InstalledApp) async -> LaunchResult { lock.withLock { diagnosisResult } }
+    func setCatalog(_ catalog: [SourcedApp]) { lock.withLock { catalogResult = catalog } }
+    func setInstalled(_ apps: [InstalledApp]) { lock.withLock { installedResult = apps } }
     func setDiagnosis(_ result: LaunchResult) { lock.withLock { diagnosisResult = result } }
 
     func perform(

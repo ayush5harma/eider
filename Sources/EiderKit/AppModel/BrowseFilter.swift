@@ -1,7 +1,7 @@
 import Foundation
 
-/// Search text and a source choice applied to the catalog. Pure, so the rule is
-/// tested without a window.
+/// Search text and a source choice. Applying it to a catalog is
+/// `BrowseIndex.results(for:)`, which works from keys folded once per catalog.
 public struct BrowseFilter: Equatable, Sendable {
     public var text = ""
     public var source: URL?
@@ -11,25 +11,18 @@ public struct BrowseFilter: Equatable, Sendable {
         self.source = source
     }
 
-    public func apply(to apps: [SourcedApp]) -> [SourcedApp] {
-        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        return apps
-            .filter { source == nil || $0.sourceURL == source }
-            .filter { entry in words.allSatisfy { matches(entry.app, word: $0) } }
-            .sorted { $0.app.name.localizedCaseInsensitiveCompare($1.app.name) == .orderedAscending }
+    /// Every word must match some field of an app.
+    var words: [String] {
+        text.split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
-    private func matches(_ app: CatalogApp, word: String) -> Bool {
-        [app.name, app.bundleID, app.developerName, app.subtitle].contains {
-            $0?.range(of: word, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-        }
+    /// No words and no source: the whole catalog, already in order.
+    var isUnfiltered: Bool {
+        source == nil && text.allSatisfy(\.isWhitespace)
     }
 }
 
-extension SourcedApp: Identifiable {
-    /// The same bundle id in two sources is two rows.
-    public var id: String { "\(source.url.absoluteString)|\(app.bundleID)" }
-}
+extension SourcedApp: Identifiable {}
 
 extension CatalogSource: Identifiable {
     public var id: URL { url }

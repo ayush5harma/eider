@@ -11,8 +11,10 @@ final class AppModelLibraryBrowseTests: XCTestCase {
         fake.set(F.sourceA, json: sourceA)
         if let sourceB { fake.set(F.sourceB, json: sourceB) }
         let (model, paths) = try F.liveModel(fetch: fake)
+        model.browseDebounce = .zero
         await model.addSource(F.sourceA)
         if sourceB != nil { await model.addSource(F.sourceB) }
+        await model.settleBrowse()
         return (model, paths)
     }
 
@@ -60,14 +62,19 @@ final class AppModelLibraryBrowseTests: XCTestCase {
         XCTAssertEqual(model.browseResults.map(\.app.name), ["Alpha Café", "Zeta Notes"], "sorted by name")
 
         model.filter.text = "ZETA"
+        await model.settleBrowse()
         XCTAssertEqual(model.browseResults.map(\.app.name), ["Zeta Notes"])
         model.filter.text = "beta works"
+        await model.settleBrowse()
         XCTAssertEqual(model.browseResults.map(\.app.name), ["Alpha Café"], "developer, every word must match")
         model.filter.text = "cafe"
+        await model.settleBrowse()
         XCTAssertEqual(model.browseResults.map(\.app.name), ["Alpha Café"], "accent-insensitive")
         model.filter.text = "org."
+        await model.settleBrowse()
         XCTAssertEqual(model.browseResults.map(\.app.bundleID), ["org.alpha"], "bundle id")
         model.filter.text = "nothing like this"
+        await model.settleBrowse()
         XCTAssertTrue(model.browseResults.isEmpty)
     }
 
@@ -79,8 +86,10 @@ final class AppModelLibraryBrowseTests: XCTestCase {
         XCTAssertEqual(Set(model.browseResults.map(\.id)).count, 3, "row identities are distinct")
 
         model.filter.source = F.sourceB
+        await model.settleBrowse()
         XCTAssertEqual(model.browseResults.map(\.app.bundleID), ["com.shared"])
         model.filter.source = F.sourceA
+        await model.settleBrowse()
         XCTAssertEqual(model.browseResults.count, 2)
     }
 

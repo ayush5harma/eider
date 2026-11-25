@@ -20,9 +20,24 @@ public final class AppModel {
     public internal(set) var sources: [CatalogSource] = []
     public internal(set) var catalog: [SourcedApp] = []
 
-    // Browse
-    public var filter = BrowseFilter()
+    // Browse. `browseResults` is stored, not computed: a computed one sorted the
+    // whole catalog on the main actor at every read. AppModel+Browse.swift keeps
+    // it, `browseIndex` and `installedByBundleID` current.
+    public var filter = BrowseFilter() {
+        didSet { if filter != oldValue { browseFilterChanged() } }
+    }
     public var selectedAppID: String?
+    public internal(set) var browseResults: [SourcedApp] = []
+    var browseIndex = BrowseIndex.empty
+    var installedByBundleID: [String: InstalledApp] = [:]
+    /// How long a change of query or source waits for the next one before the
+    /// filter runs. Tests set it to zero.
+    @ObservationIgnored public var browseDebounce = Duration.milliseconds(150)
+    @ObservationIgnored var catalogStamp: CatalogStamp?
+    @ObservationIgnored var indexTask: Task<Void, Never>?
+    @ObservationIgnored var indexGeneration = 0
+    @ObservationIgnored var filterTask: Task<Void, Never>?
+    @ObservationIgnored var filterGeneration = 0
 
     // Sources
     public var newSourceText = ""
@@ -67,9 +82,12 @@ public final class AppModel {
     /// touches the network: that is `refreshAllSources()`, on the person's action.
     public func reload() async {
         do {
-            installed = try await backend.installedApps()
+            let loadedInstalled = try await backend.installedApps()
+            installed = loadedInstalled
+            installedByBundleID = Dictionary(
+                loadedInstalled.map { ($0.bundleID, $0) }, uniquingKeysWith: { first, _ in first })
             sources = try await backend.sources()
-            catalog = try await backend.catalog()
+            setCatalog(try await backend.catalog())
             let available = try await backend.availableUpdates()
             updates = Dictionary(available.map { ($0.installed.bundleID, $0) }, uniquingKeysWith: { first, _ in first })
         } catch {
