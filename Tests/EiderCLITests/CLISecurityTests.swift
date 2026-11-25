@@ -1,4 +1,5 @@
 import ArgumentParser
+import EiderKit
 import Foundation
 import XCTest
 @testable import eider
@@ -28,6 +29,31 @@ final class CLISecurityTests: XCTestCase {
     func testAddressesAndLinksStayAddresses() {
         XCTAssertEqual(InstallCommand.resolve("https://example.com/a.ipa"), .address(URL(string: "https://example.com/a.ipa")!))
         XCTAssertEqual(InstallCommand.resolve("eider://install/https://example.com/a.ipa"), .address(URL(string: "https://example.com/a.ipa")!))
+    }
+
+    func testSettleDefaultsToTheProbesAndIsCheckedAgainstTheTimeout() throws {
+        XCTAssertEqual(try resolveSettle(nil, timeout: 20), LaunchProbe.defaultSettle)
+        XCTAssertEqual(try resolveSettle(3, timeout: 20), 3)
+        for (settle, timeout) in [(0.0, 20.0), (-1, 20), (20, 20), (30, 20), (.nan, 20)] {
+            XCTAssertThrowsError(try resolveSettle(settle, timeout: timeout), "\(settle) vs \(timeout)") { error in
+                XCTAssertTrue(error is ValidationError)
+            }
+        }
+    }
+
+    func testADefaultSettleLongerThanTheTimeoutAsksForAnExplicitOne() {
+        XCTAssertThrowsError(try resolveSettle(nil, timeout: 5)) { error in
+            XCTAssertTrue("\(error)".contains("--settle"), "\(error)")
+        }
+    }
+
+    func testOpenAndDoctorParseTheSettleFlag() throws {
+        XCTAssertEqual(try OpenCommand.parse(["com.example.app", "--settle", "3.5"]).settle, 3.5)
+        XCTAssertNil(try OpenCommand.parse(["com.example.app"]).settle)
+        XCTAssertEqual(try DoctorCommand.parse(["com.example.app", "--settle", "3.5", "--timeout", "30"]).settle, 3.5)
+        XCTAssertThrowsError(try DoctorCommand.parse(["com.example.app", "--settle", "0"]))
+        XCTAssertThrowsError(try OpenCommand.parse(["com.example.app", "--settle", "30", "--timeout", "10"]))
+        XCTAssertThrowsError(try OpenCommand.parse(["com.example.app", "--settle", "abc"]))
     }
 
     func testABundleIDArgumentIsValidatedLikeAnyOther() {

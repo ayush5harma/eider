@@ -10,8 +10,18 @@ public enum LaunchClassifier {
     /// Rules in priority order: a crash cause outranks the denials that are
     /// logged alongside it on most launches. `processName` scopes the kernel's
     /// System Policy and Sandbox lines, which name the process that was refused.
-    public static func classify(lines rawLines: [String], processName: String?) -> LaunchDiagnosis {
+    /// `appBinaries` is the set of Mach-O file names inside the installed bundle;
+    /// it lets an uncaught exception say which of the app's own binaries threw.
+    public static func classify(lines rawLines: [String], processName: String?, appBinaries: Set<String> = []) -> LaunchDiagnosis {
         let lines = expand(rawLines)
+        // First, ahead of every dyld, AMFI and denial rule: a process that
+        // logged "Terminating app due to uncaught exception" got past dyld and
+        // code signing and ran app code, so those cannot be why it died, while
+        // the keyword rules below match substrings that a running app also logs
+        // for benign reasons (a handled -34018, a denied read, a dlopen that
+        // failed and was caught). An app killed by AMFI or dyld never reaches
+        // the exception machinery, so it has no such line.
+        if let diagnosis = uncaughtException(in: lines, processName: processName, appBinaries: appBinaries) { return diagnosis }
         if let hit = first(lines, matching: ["FairPlay", "cryptid", "file is encrypted", "binary is encrypted"]) {
             return LaunchDiagnosis(
                 code: .encryptedBinary,
@@ -41,6 +51,22 @@ public enum LaunchClassifier {
                 summary: "The app needs \(symbol), which this version of macOS does not provide, so it cannot run here.",
                 evidence: evidence(hit))
         }
+        if let denial = denial(in: lines, processName: processName) { return denial }
+        let relevant = lines.filter { processName.map($0.contains) ?? true }
+        return LaunchDiagnosis(
+            code: .unknown,
+            summary: "The app did not stay running and the logs do not say why; the last relevant lines are listed below.",
+            evidence: evidence(Array((relevant.isEmpty ? lines : relevant).suffix(maxEvidenceLines))))
+    }
+
+    // MARK: Denials
+
+    /// The three denials a launch can leave in the log, in the order they are
+    /// tried: the keychain's -34018, macOS System Policy, the app's sandbox.
+    /// The last two name the process that was refused, so `processName` scopes
+    /// them. Used on their own for a launch with no better cause, and beside an
+    /// uncaught exception, where one of them may be what the app tripped over.
+    private static func denial(in lines: [String], processName: String?) -> LaunchDiagnosis? {
         if let hit = first(lines, matching: ["-34018", "errSecMissingEntitlement"]) {
             return LaunchDiagnosis(
                 code: .keychainEntitlement,
@@ -59,11 +85,74 @@ public enum LaunchClassifier {
                 summary: "The app's sandbox refused something it tried to do (see the evidence); it may need an entitlement that Eider does not grant.",
                 evidence: evidence(hit))
         }
-        let relevant = lines.filter { processName.map($0.contains) ?? true }
-        return LaunchDiagnosis(
-            code: .unknown,
-            summary: "The app did not stay running and the logs do not say why; the last relevant lines are listed below.",
-            evidence: evidence(Array((relevant.isEmpty ? lines : relevant).suffix(maxEvidenceLines))))
+        return nil
+    }
+
+    // MARK: Uncaught exceptions
+
+    /// The text the Objective-C runtime logs when an exception reaches the top;
+    /// `LaunchProbe` looks for the same string to decide whether to walk the bundle.
+    static let exceptionMarker = "Terminating app due to uncaught exception"
+    private static let exceptionPattern = try! NSRegularExpression(
+        pattern: #"Terminating app due to uncaught exception '([^']+)'(?:, reason: '(.*)')?"#)
+    /// A symbolicated backtrace line: index, image name (which may hold
+    /// spaces), 0x address, then the symbol with its "+ offset".
+    private static let framePattern = try! NSRegularExpression(
+        pattern: #"^\d+\s+(.+?)\s+0x[0-9a-fA-F]+\s+(.*?)(?:\s+\+\s+\d+)?$"#)
+
+    /// The backtrace frames follow the "Terminating" line (log continuation
+    /// lines, or the crash report's "Last Exception Backtrace"), so only that
+    /// run of frame lines is searched: it ends at the first line that is not a
+    /// frame, so an unrelated event cannot lend its frame. A crash report's
+    /// "...Backtrace:" header sits between them and is skipped. A crash report
+    /// saved as .ips keeps its frames as JSON objects, not text, so it yields the
+    /// exception but no "thrown from".
+    ///
+    /// A denial logged for the same process rides along: the exception rule
+    /// stays first, but the denial may be what the app tripped over, and a
+    /// reader who only sees the exception would never learn of it.
+    private static func uncaughtException(in lines: [String], processName: String?, appBinaries: Set<String>) -> LaunchDiagnosis? {
+        guard let index = lines.firstIndex(where: { $0.contains(exceptionMarker) }),
+              let match = captures(exceptionPattern, in: lines[index]) else { return nil }
+        var summary = "The app stopped on an uncaught \(printable(match[0] ?? "exception"))"
+        if match.count > 1, let reason = match[1], !reason.isEmpty { summary += " (\(printable(reason)))" }
+        var evidenceLines = [lines[index]]
+        if let frame = appFrame(after: index, in: lines, binaries: appBinaries) {
+            summary += ", thrown from \(printable(frame.image))"
+            if !frame.symbol.isEmpty, !frame.symbol.hasPrefix("0x") { summary += " in \(printable(frame.symbol))" }
+            evidenceLines.append(frame.line)
+        }
+        summary += "."
+        if let side = denial(in: lines, processName: processName) {
+            summary += " The log also shows a denial that may be behind it: \(side.summary)"
+            evidenceLines += side.evidence
+        }
+        return LaunchDiagnosis(code: .uncaughtException, summary: summary, evidence: evidence(evidenceLines))
+    }
+
+    private static func appFrame(after index: Int, in lines: [String], binaries: Set<String>) -> (image: String, symbol: String, line: String)? {
+        for line in lines[(index + 1)...] {
+            if line.hasSuffix("Backtrace:") { continue }
+            guard let match = captures(framePattern, in: line), let image = match[0] else { return nil }
+            if binaries.contains(image) { return (image, (match.count > 1 ? match[1] : nil) ?? "", line) }
+        }
+        return nil
+    }
+
+    /// Text lifted from a log line into a sentence: control characters (an
+    /// escape sequence in a reason would reach a terminal) removed, and cut to
+    /// the width evidence lines are cut to.
+    private static func printable(_ text: String) -> String {
+        let clean = String(String.UnicodeScalarView(text.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }))
+        return clean.count > maxEvidenceWidth ? String(clean.prefix(maxEvidenceWidth)) + "..." : clean
+    }
+
+    /// The capture groups of the first match; nil for a group that did not take part.
+    private static func captures(_ regex: NSRegularExpression, in line: String) -> [String?]? {
+        guard let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else { return nil }
+        return (1..<match.numberOfRanges).map { group in
+            Range(match.range(at: group), in: line).map { String(line[$0]) }
+        }
     }
 
     // MARK: Internals
