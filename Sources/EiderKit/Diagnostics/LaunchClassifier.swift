@@ -59,6 +59,33 @@ public enum LaunchClassifier {
             evidence: evidence(Array((relevant.isEmpty ? lines : relevant).suffix(maxEvidenceLines))))
     }
 
+    // MARK: An empty window
+
+    /// UIKit's warning when a view controller is presented from one whose view
+    /// is in no window. Common and often harmless on its own, so it counts only
+    /// together with a window that holds next to nothing.
+    static let windowNotAttachedMarker = "whose view is not in the window hierarchy"
+    /// Most accessibility elements an empty window still has: the title bar's
+    /// buttons and a few containers. Measured 2026-11-26 with YouTube 21.47.6 on
+    /// macOS 27.3: 8 with its window empty, 79 once its controller was attached.
+    public static let emptyWindowMaxElements = 12
+
+    /// For an app that stayed running: is its window empty because its first
+    /// screen was never attached? `contentElements` is the count of
+    /// accessibility elements in its windows, nil when it could not be counted
+    /// (no Accessibility permission), and then nothing is concluded: the log
+    /// line alone is too common to call a window empty.
+    public static func emptyWindow(lines rawLines: [String], processName: String, contentElements: Int?) -> LaunchDiagnosis? {
+        guard let contentElements, contentElements <= emptyWindowMaxElements else { return nil }
+        guard let hit = first(expand(rawLines), matching: [windowNotAttachedMarker], process: processName) else { return nil }
+        return LaunchDiagnosis(
+            code: .windowNotAttached,
+            summary: "The app is still running, but its window is empty: it showed its first screen before macOS "
+                + "gave it a window and never put that screen into the window. Eider has no fix that is safe for every "
+                + "app; please report the app (its name, bundle id and version) so a workaround can be added for it.",
+            evidence: evidence(Array(hit.prefix(2)) + ["Its windows hold \(contentElements) accessibility elements."]))
+    }
+
     // MARK: Denials
 
     /// The three denials a launch can leave in the log, in the order they are

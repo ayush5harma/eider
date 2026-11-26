@@ -23,6 +23,11 @@ public struct LaunchDiagnosis: Codable, Sendable, Equatable {
         case uncaughtException = "uncaught_exception"
         /// `open` itself refused, before any process existed.
         case openFailed = "open_failed"
+        /// The app stayed running but its window is empty: its launch sequence
+        /// presented its first screen before Catalyst's late first scene gave it
+        /// a window ("... whose view is not in the window hierarchy") and never
+        /// attached it. The process is left running.
+        case windowNotAttached = "window_not_attached"
         case unknown
     }
 
