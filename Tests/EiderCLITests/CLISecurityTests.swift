@@ -19,6 +19,13 @@ final class CLISecurityTests: XCTestCase {
         XCTAssertEqual(InstallCommand.resolve("com.example.app"), .catalog("com.example.app"))
     }
 
+    /// A full entry id starts with its source's address but is not one to download.
+    func testAFullEntryIDIsACatalogLookupNotAnAddress() {
+        let id = "https://example.com/repo.json|com.google.ios.youtube|ytkace (1.1.9)"
+        XCTAssertEqual(InstallCommand.resolve(id), .catalog(id))
+        XCTAssertNoThrow(try requireCatalogID(id))
+    }
+
     func testAPathIsAPathWhetherOrNotItExists() {
         XCTAssertEqual(InstallCommand.resolve("./app.ipa"), .localFile(URL(fileURLWithPath: "./app.ipa")))
         XCTAssertEqual(InstallCommand.resolve("dir/app"), .localFile(URL(fileURLWithPath: "dir/app")))
