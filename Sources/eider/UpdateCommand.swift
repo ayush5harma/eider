@@ -13,6 +13,9 @@ struct UpdateCommand: AsyncParsableCommand {
     @Flag(name: .customLong("all"), help: "Update every app that has an update.")
     var all = false
 
+    @Option(name: .customLong("interface-size"), help: "Also set how large the app draws: \(interfaceSizeValues). Kept from the installed app otherwise.")
+    var interfaceSize: InterfaceScale?
+
     @OptionGroup var common: CommonOptions
 
     private struct Payload: Encodable {
@@ -35,6 +38,7 @@ struct UpdateCommand: AsyncParsableCommand {
             var updated: [InstalledApp] = []
             var current: [String] = []
             for id in ids {
+                if let interfaceSize { _ = try await operations.setInterfaceScale(interfaceSize, bundleID: id) }
                 if let app = try await operations.update(bundleID: id, onEvent: output.progressHandler()) {
                     updated.append(app)
                 } else {

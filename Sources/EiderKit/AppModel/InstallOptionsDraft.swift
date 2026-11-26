@@ -11,6 +11,7 @@ public struct InstallOptionsDraft: Equatable, Sendable {
     public var resetData = false
     public var extraDylibs: [URL] = []
     public var destination: URL
+    public var interfaceScale = InterfaceScale.newInstallDefault
 
     public init(destination: URL) {
         self.destination = destination
@@ -20,7 +21,8 @@ public struct InstallOptionsDraft: Equatable, Sendable {
         InstallOptions(
             destination: destination, macIdiom: macIdiom, keychainShim: keychainShim,
             extraDylibs: extraDylibs, displayName: Self.trimmed(displayName),
-            bundleID: Self.trimmed(bundleID), removeExtensions: removeExtensions, resetData: resetData)
+            bundleID: Self.trimmed(bundleID), removeExtensions: removeExtensions, resetData: resetData,
+            interfaceScale: interfaceScale)
     }
 
     private static func trimmed(_ text: String) -> String? {

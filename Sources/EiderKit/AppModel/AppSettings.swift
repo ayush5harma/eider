@@ -5,6 +5,9 @@ import Foundation
 /// tests and the smoke script never touch the owner's preferences.
 public struct AppSettings: Codable, Equatable, Sendable {
     public var defaultInstallLocation: URL
+    /// The Library's offer to put apps installed before 0.1.9 on Auto was
+    /// answered "Not Now". Optional so a settings file without it still reads.
+    public var interfaceScaleOfferDismissed: Bool?
 
     public init(defaultInstallLocation: URL = InstallOptions.defaultDestination) {
         self.defaultInstallLocation = defaultInstallLocation

@@ -23,6 +23,11 @@ struct LibraryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         if !model.updates.isEmpty { updatesBanner }
+                        if let notice = model.interfaceScaleNotice {
+                            InterfaceSizeNotice(text: notice) { model.interfaceScaleNotice = nil }
+                        } else if model.showsInterfaceScaleOffer {
+                            InterfaceSizeOffer(model: model)
+                        }
                         LazyVGrid(columns: columns, spacing: 30) {
                             ForEach(model.installed) { app in
                                 LibraryCell(model: model, app: app) { uninstalling = app }
@@ -121,6 +126,12 @@ private struct LibraryCell: View {
     @ViewBuilder private var actions: some View {
         Button("Open") { NSWorkspace.shared.open(app.path) }
         if model.hasUpdate(app) { Button("Update") { model.update(app) } }
+        Picker("Interface Size", selection: Binding(
+            get: { model.interfaceScale(of: app) },
+            set: { scale in Task { await model.setInterfaceScale(scale, for: app) } }
+        )) {
+            ForEach(InterfaceScale.allCases, id: \.self) { Text($0.label).tag($0) }
+        }
         Button("Diagnose") { Task { await model.diagnose(app) } }
         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.path]) }
         Divider()

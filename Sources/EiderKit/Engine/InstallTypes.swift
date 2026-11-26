@@ -66,6 +66,11 @@ public struct InstallOptions: Codable, Sendable, Equatable {
     public var resetData: Bool
     /// Replace a same-named bundle even when its bundle id differs.
     public var force: Bool
+    /// How large the app draws (`InterfaceScale`), written into its container's
+    /// preferences after placement. nil: never set (entries written before
+    /// 0.1.9, where the key is absent), which leaves the preferences alone.
+    /// Recorded, so an update keeps it.
+    public var interfaceScale: InterfaceScale?
     /// Recorded in the library, nothing more.
     public var sourceURL: URL?
     public var ipaSHA256: String?
@@ -106,6 +111,7 @@ public struct InstallOptions: Codable, Sendable, Equatable {
         removeExtensions: Bool = false,
         resetData: Bool = false,
         force: Bool = false,
+        interfaceScale: InterfaceScale? = nil,
         sourceURL: URL? = nil,
         ipaSHA256: String? = nil,
         expectedBundleID: String? = nil
@@ -119,6 +125,7 @@ public struct InstallOptions: Codable, Sendable, Equatable {
         self.removeExtensions = removeExtensions
         self.resetData = resetData
         self.force = force
+        self.interfaceScale = interfaceScale
         self.sourceURL = sourceURL
         self.ipaSHA256 = ipaSHA256
         self.expectedBundleID = expectedBundleID

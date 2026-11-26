@@ -14,6 +14,7 @@ struct InstallOptionsSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Install \(pending.request.title)").font(.title3.bold())
                 Form {
+                    InterfaceSizePicker(selection: draft(\.interfaceScale))
                     Toggle("Run in the Mac idiom", isOn: draft(\.macIdiom))
                     Toggle("Keychain shim", isOn: draft(\.keychainShim))
                     TextField("Display name", text: draft(\.displayName), prompt: Text("Keep the app's own"))

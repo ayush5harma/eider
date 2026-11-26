@@ -16,6 +16,7 @@ public struct AppOperations: Sendable {
     private let downloads: DownloadManager
     private let installIPA: IPAInstall
     private let uninstaller: Uninstaller
+    let preferences: AppPreferences
 
     public init(
         paths: EiderPaths = EiderPaths(),
@@ -31,7 +32,11 @@ public struct AppOperations: Sendable {
             uninstaller: Uninstaller(store: library))
     }
 
-    init(sources: SourceStore, library: LibraryStore, downloads: DownloadManager, installIPA: @escaping IPAInstall, uninstaller: Uninstaller) {
+    init(
+        sources: SourceStore, library: LibraryStore, downloads: DownloadManager, installIPA: @escaping IPAInstall, uninstaller: Uninstaller,
+        preferences: AppPreferences = .standard
+    ) {
+        self.preferences = preferences
         self.sources = sources
         self.library = library
         self.downloads = downloads

@@ -29,6 +29,22 @@ final class StubBackend: AppBackend, @unchecked Sendable {
     func setInstalled(_ apps: [InstalledApp]) { lock.withLock { installedResult = apps } }
     func setDiagnosis(_ result: LaunchResult) { lock.withLock { diagnosisResult = result } }
 
+    private var scaleCalls: [(InterfaceScale, String)] = []
+    var interfaceScaleCalls: [(InterfaceScale, String)] { lock.withLock { scaleCalls } }
+
+    func setInterfaceScale(_ scale: InterfaceScale, bundleID: String) async throws -> InterfaceScaleChange {
+        let app = lock.withLock { () -> InstalledApp? in
+            scaleCalls.append((scale, bundleID))
+            guard let index = installedResult.firstIndex(where: { $0.bundleID == bundleID }) else { return nil }
+            var options = installedResult[index].options
+            options.interfaceScale = scale
+            installedResult[index] = installedResult[index].replacingOptions(options)
+            return installedResult[index]
+        }
+        guard let app else { throw OperationFailure(code: "operations.not_installed", message: "No installed app has the bundle id \(bundleID).") }
+        return InterfaceScaleChange(app: app, message: "Interface size: \(scale.label)")
+    }
+
     func perform(
         _ request: InstallRequest, options: InstallOptions,
         onEvent: @escaping @Sendable (OperationEvent) -> Void

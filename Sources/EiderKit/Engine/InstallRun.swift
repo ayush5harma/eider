@@ -218,6 +218,19 @@ final class InstallRun: @unchecked Sendable {
 
     // MARK: Place
 
+    /// After placement (a reset has emptied the container by then). The app is
+    /// installed either way, so a failure here is a warning.
+    private func applyInterfaceScale() {
+        let preferences = AppPreferences(containersDirectory: reset.containersDirectory)
+        do {
+            if let line = try preferences.apply(options.interfaceScale, bundleID: identity.bundleID, display: .main()) {
+                emit(.place, line, 0.97)
+            }
+        } catch {
+            emit(.warning, "Installed, but the interface size was not saved: \(error.localizedDescription)", 0.97)
+        }
+    }
+
     private func place() throws -> InstalledApp {
         emit(.place, "Installing into \(options.destination.path)", 0.94)
         let placer = AppPlacer(
@@ -225,6 +238,7 @@ final class InstallRun: @unchecked Sendable {
             emit: { [onEvent] message, fraction in onEvent(InstallEvent(step: .place, message: message, fraction: fraction)) })
         let target = try placer.place(app, name: identity.name, bundleID: identity.bundleID, into: options.destination)
         _ = try? ProcessRunner.run(Self.lsregister, ["-f", target.path])
+        applyInterfaceScale()
         return InstalledApp(
             bundleID: identity.bundleID, name: identity.name,
             version: plist.string("CFBundleShortVersionString").map(DisplayText.sanitized) ?? "",
