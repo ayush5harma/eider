@@ -49,6 +49,15 @@ public struct CatalogApp: Codable, Sendable, Hashable {
 
     public var latest: CatalogVersion? { versions.first }
 
+    /// What makes two entries with one bundle id the same app: the name, trimmed,
+    /// with runs of whitespace collapsed, ignoring case. Tweak sources list many
+    /// different apps under one bundle id (`CatalogMerge`).
+    public var nameKey: String { Self.nameKey(name) }
+
+    static func nameKey(_ name: String) -> String {
+        name.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+    }
+
     public init(
         bundleID: String, name: String, developerName: String? = nil, subtitle: String? = nil,
         description: String? = nil, iconURL: URL? = nil, tintColor: String? = nil,
@@ -112,15 +121,23 @@ public struct CatalogSource: Codable, Sendable, Hashable {
     /// bundle id were merged into one app (so `apps.count` is smaller); nil when
     /// nothing was merged or the copy predates merging.
     public var entryCount: Int?
+    /// The `CatalogMerge.rule` this copy was merged with; nil for a copy saved by
+    /// 0.1.2 to 0.1.6, which merged every entry sharing a bundle id.
+    public var mergeRule: Int?
+
+    /// Whether this saved copy predates the current merge rule. The app's launch
+    /// check refetches such a source at once instead of waiting for it to age.
+    public var isOverMerged: Bool { mergeRule != CatalogMerge.rule }
 
     public init(
         url: URL, format: SourceFormat, name: String, identifier: String? = nil,
         subtitle: String? = nil, description: String? = nil, iconURL: URL? = nil,
         headerURL: URL? = nil, website: URL? = nil, tintColor: String? = nil,
         apps: [CatalogApp] = [], news: [CatalogNews] = [], warnings: [String] = [],
-        fetchedAt: Date = Date(), entryCount: Int? = nil
+        fetchedAt: Date = Date(), entryCount: Int? = nil, mergeRule: Int? = nil
     ) {
         self.entryCount = entryCount
+        self.mergeRule = mergeRule
         self.url = url
         self.format = format
         self.name = name
@@ -149,9 +166,9 @@ public struct SourcedApp: Sendable, Hashable {
 
     public var sourceURL: URL { source.url }
 
-    /// Unique within one source once its entries are merged (`CatalogMerge`); a
-    /// catalog built from several sources makes it unique across them with
-    /// `init(source:app:id:)` should two ever collide.
+    /// The id of an app that is the only one its source lists under its bundle
+    /// id: "<source url>|<bundle id>". Use `entries(of:)` for a whole source,
+    /// which tells these from the ones that need the name too.
     public init(source: CatalogSource, app: CatalogApp) {
         self.init(source: source, app: app, id: "\(source.url.absoluteString)|\(app.bundleID)")
     }
@@ -160,5 +177,29 @@ public struct SourcedApp: Sendable, Hashable {
         self.source = source
         self.app = app
         self.id = id
+    }
+
+    /// Every app of a source with its row id. An id is "<source url>|<bundle id>"
+    /// while the source lists one name under that bundle id (so ids and selections
+    /// made before names mattered survive), and "<source url>|<bundle id>|<name>"
+    /// (`CatalogApp.nameKey`) once it lists several: one bundle id is then several
+    /// apps (`CatalogMerge`), each its own row.
+    public static func entries(of source: CatalogSource) -> [SourcedApp] {
+        var firstName: [String: String] = [:]
+        var shared = Set<String>()
+        for app in source.apps {
+            let name = app.nameKey
+            if let seen = firstName[app.bundleID] {
+                if seen != name { shared.insert(app.bundleID) }
+            } else {
+                firstName[app.bundleID] = name
+            }
+        }
+        let base = source.url.absoluteString
+        return source.apps.map { app in
+            let id = shared.contains(app.bundleID)
+                ? "\(base)|\(app.bundleID)|\(app.nameKey)" : "\(base)|\(app.bundleID)"
+            return SourcedApp(source: source, app: app, id: id)
+        }
     }
 }

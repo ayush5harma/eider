@@ -138,10 +138,22 @@ public struct AppOperations: Sendable {
 
     // MARK: Lookups
 
-    /// The first source (in the order they were added) that lists `bundleID`.
-    public func catalogEntry(bundleID: String) async throws -> SourcedApp? {
+    /// The entry `text` names: a full entry id (`SourcedApp.id`, which always
+    /// wins), or a bundle id. A bundle id is looked up in the first source (in
+    /// the order they were added) that lists it; nil when none does. When that
+    /// source lists several apps under it (a tweak source ships many under the
+    /// original app's id) this throws `ambiguousEntry` with the candidates,
+    /// rather than pick one the person did not choose.
+    public func catalogEntry(matching text: String) async throws -> SourcedApp? {
         do {
-            return try await sources.allApps().first { $0.app.bundleID == bundleID }
+            let all = try await sources.allApps()
+            if let exact = all.first(where: { $0.id == text }) { return exact }
+            guard let first = all.first(where: { $0.app.bundleID == text }) else { return nil }
+            let sameSource = all.filter { $0.app.bundleID == text && $0.sourceURL == first.sourceURL }
+            guard sameSource.count > 1 else { return first }
+            throw OperationFailure.ambiguousEntry(text, candidates: sameSource)
+        } catch let failure as OperationFailure {
+            throw failure
         } catch {
             throw OperationFailure.wrap(error)
         }
@@ -167,7 +179,7 @@ public struct AppOperations: Sendable {
             // under the owner's own --bundle-id. It never becomes `options.bundleID`.
             options.expectedBundleID = expectsCatalogID ? app.bundleID : nil
             // Provenance for the update matcher: the listed id is kept as data next to the source.
-            options.origin = expectsCatalogID ? InstallOrigin(sourceURL: sourceURL, entryID: app.bundleID) : nil
+            options.origin = expectsCatalogID ? InstallOrigin(sourceURL: sourceURL, entryID: app.bundleID, entryName: app.name) : nil
             var mapper = DownloadEventMapper(label: "\(app.name) \(release.version)")
             var file: URL?
             for try await event in downloads.download(release, of: app) {

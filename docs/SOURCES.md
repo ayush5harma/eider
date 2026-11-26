@@ -72,10 +72,11 @@ accepted and never fetched. `checksum` is optional.
 
 ## One app, several entries
 
-Some sources list the same app once per version (one in use has 17,430
-entries for 3,597 bundle ids). Eider merges entries that share a bundle id
+Some sources list the same app once per version ("1Blocker" ten times in one
+with 17,444 entries). Eider merges entries that share a bundle id AND a name
 within one source into a single app, when the source is read and again when a
-saved copy is loaded, so the browse list has one row per app:
+saved copy is loaded, so the browse list has one row per app. Names are
+compared trimmed, with runs of whitespace collapsed, ignoring case.
 
 - The app's versions are the union of every entry's versions, newest first.
   The same version at the same download URL is listed once; the same version
@@ -92,7 +93,22 @@ saved copy is loaded, so the browse list has one row per app:
   come from the entry carrying the newest version; a field it leaves empty is
   taken from the first other entry that has one. Notes, size, date, sha256 and
   the download URL stay with their own version.
-- Entries with different names but one bundle id are still one app.
+- Entries with different names but one bundle id are different apps and stay
+  separate rows. Tweak sources ship many apps under the original app's bundle
+  id: the same 17,444-entry source lists 211 entries under
+  com.google.ios.youtube as 152 apps (YouTubeOLED, YTPlus, YTKACE, ...).
+  Merging by bundle id alone (Eider 0.1.2 to 0.1.6) hid about 7,500 of its
+  entries. A row's id is "<source url>|<bundle id>" while the source lists one
+  name under that bundle id, and "<source url>|<bundle id>|<name>" (the
+  name as compared above, lower-cased) when it lists several. `eider install`
+  and `eider info` take a bundle id, or that full id; a bundle id that several
+  apps of the first source listing it share is refused with the candidates
+  (name, version, id) rather than guessed.
+- A saved source records the merge rule it was written under (`mergeRule`).
+  Copies saved by 0.1.2 to 0.1.6 have none and cannot be repaired, since the
+  entries that were folded away are gone from the file: the app's launch check
+  refetches them at once (not after six hours), and `eider source refresh`
+  does the same on demand. `eider source list` says when a source needs it.
 - Different sources are never merged; the same bundle id in two sources is
   two rows. Merging is not a warning; `eider source add` prints how many
   entries were listed.

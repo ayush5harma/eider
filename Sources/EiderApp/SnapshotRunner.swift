@@ -65,7 +65,7 @@ struct SnapshotRunner {
         try await write(window, named: "browse-detail" + suffix)
         // An app with an update shows the status pill and the version list.
         if let update = model.browseResults.first(where: {
-            if case .updateAvailable = model.status(of: $0.app) { return true } else { return false }
+            if case .updateAvailable = model.status(of: $0) { return true } else { return false }
         }) {
             model.selectedAppID = update.id
             try await write(window, named: "browse-update" + suffix)

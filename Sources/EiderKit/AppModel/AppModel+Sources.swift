@@ -74,11 +74,13 @@ extension AppModel {
     public static let staleSourceAge: TimeInterval = 6 * 3600
 
     /// At launch: fetch, in the background, only the sources whose copy is
-    /// older than `staleSourceAge`, then work out the updates again. The window
+    /// older than `staleSourceAge` or was saved under an older merge rule
+    /// (`CatalogSource.isOverMerged`: its missing apps are only back after a
+    /// fetch, so it does not wait out the age), then work out the updates again. The window
     /// is usable throughout (the fetch and the parse run off the main actor),
     /// and a failed fetch keeps the old copy and is shown on the Sources page.
     public func refreshStaleSources(now: Date = Date()) async {
-        let stale = sources.filter { now.timeIntervalSince($0.fetchedAt) > Self.staleSourceAge }.map(\.url)
+        let stale = sources.filter { $0.isOverMerged || now.timeIntervalSince($0.fetchedAt) > Self.staleSourceAge }.map(\.url)
         guard !stale.isEmpty, !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }

@@ -93,8 +93,7 @@ public actor SourceStore {
         var taken = Set<String>()
         var apps: [SourcedApp] = []
         for source in try current() {
-            for app in source.apps {
-                let sourced = SourcedApp(source: source, app: app)
+            for sourced in SourcedApp.entries(of: source) {
                 apps.append(taken.insert(sourced.id).inserted ? sourced : Self.uniquely(sourced, among: &taken))
             }
         }
@@ -106,7 +105,8 @@ public actor SourceStore {
 
     /// Rows and lookups are keyed by `SourcedApp.id`. Merging makes it unique within
     /// a source, so this only runs for a hand-edited file that lists one address
-    /// twice (or a bundle id holding the "|" separator): the later copy gets "#2",
+    /// twice (or a bundle id holding the "|" separator), or a copy saved before
+    /// the current merge rule that still lists duplicates: the later copy gets "#2",
     /// "#3", ... in list order, so the same file always yields the same ids.
     private static func uniquely(_ sourced: SourcedApp, among taken: inout Set<String>) -> SourcedApp {
         var number = 2
@@ -169,7 +169,9 @@ public actor SourceStore {
         if data.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) { return [] }
         do {
             // A copy saved before entries were merged is merged here, in memory;
-            // the file is rewritten at the next change.
+            // the file is rewritten at the next change. A copy saved under an older
+            // rule keeps its `mergeRule` (nil or 1) and is refetched, not repaired:
+            // what that rule folded away is gone from the file.
             return try Self.decoder.decode(FileContents.self, from: data).sources.map(CatalogMerge.normalized)
         } catch {
             throw CatalogFailure.storeUnreadable("not valid JSON")

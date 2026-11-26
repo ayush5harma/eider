@@ -88,7 +88,7 @@ private struct BrowseRow: View {
             }
             Spacer(minLength: 6)
             // Looked up here, so only the rows on screen ask.
-            StatusTag(status: model.status(of: entry.app))
+            StatusTag(status: model.status(of: entry))
         }
         .padding(.vertical, 5)
     }

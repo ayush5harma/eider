@@ -74,7 +74,7 @@ final class SecurityCatalogIDTests: XCTestCase {
 
         let downloads = paths.downloads.resolvingSymlinksInPath()
         for id in listed {
-            let entry = try await operations.catalogEntry(bundleID: id)
+            let entry = try await operations.catalogEntry(matching: id)
             let found = try XCTUnwrap(entry, id)
             XCTAssertEqual(found.app.bundleID, id)
             _ = try await operations.install(app: found.app, from: found.source)

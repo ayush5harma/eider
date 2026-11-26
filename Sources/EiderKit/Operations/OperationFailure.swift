@@ -45,6 +45,22 @@ public struct OperationFailure: Error, Sendable, Equatable, LocalizedError, Cust
             message: "None of your sources lists \(bundleID). Add a source that does, or install from a file or an https address.")
     }
 
+    /// How many candidates the message names; a tweak source lists 152 apps under one id.
+    private static let ambiguousShown = 12
+
+    /// One bundle id, several apps in the same source. The full entry id is the
+    /// way to name one of them, so it is what each line ends with.
+    static func ambiguousEntry(_ bundleID: String, candidates: [SourcedApp]) -> OperationFailure {
+        let lines = candidates.prefix(ambiguousShown).map { entry in
+            "  \(entry.app.name) \(entry.app.latest?.version ?? "-")  \(entry.id)"
+        }
+        let more = candidates.count > ambiguousShown ? ["  ... and \(candidates.count - ambiguousShown) more (eider search lists them)"] : []
+        return OperationFailure(
+            code: "operations.ambiguous_entry",
+            message: "\(candidates.count) apps in one source share the bundle id \(bundleID). Name one by its full id:\n"
+                + (lines + more).joined(separator: "\n"))
+    }
+
     static func noSuchVersion(_ version: String, available: [String]) -> OperationFailure {
         OperationFailure(
             code: "operations.no_such_version",

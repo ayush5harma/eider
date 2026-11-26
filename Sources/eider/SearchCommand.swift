@@ -11,6 +11,8 @@ struct SearchCommand: AsyncParsableCommand {
     @OptionGroup var common: CommonOptions
 
     private struct Row: Encodable {
+        /// The entry id `eider install` and `eider info` accept when several apps share a bundle id.
+        let id: String
         let bundleID: String
         let name: String
         let developer: String?
@@ -26,7 +28,7 @@ struct SearchCommand: AsyncParsableCommand {
                 .filter { Self.matches($0.app, term) }
                 .sorted { $0.app.name.localizedCaseInsensitiveCompare($1.app.name) == .orderedAscending }
             let rows = found.map {
-                Row(bundleID: $0.app.bundleID, name: $0.app.name, developer: $0.app.developerName,
+                Row(id: $0.id, bundleID: $0.app.bundleID, name: $0.app.name, developer: $0.app.developerName,
                     version: UpdateChecker.newestVersion(of: $0.app)?.version, source: $0.source.name)
             }
             let text = rows.isEmpty

@@ -38,7 +38,9 @@ func requireBundleID(_ text: String) throws {
 /// sources list ids the strict check refuses (`cypwn.AppCake+.7.2.2`), and
 /// `eider search` shows them, so a lookup takes what a source may list.
 func requireCatalogID(_ text: String) throws {
-    guard CatalogIdentifier.isListable(text) else {
+    // A full entry id ("<source address>|<bundle id>|<name>") is longer than any
+    // bundle id: its address and name come on top.
+    guard CatalogIdentifier.isListable(text) || CatalogIdentifier.isListableEntryID(text) else {
         throw ValidationError("\(DisplayText.escapingControls(text)) is not an id a source can list: it is empty, longer than \(CatalogIdentifier.maxBytes) bytes or has control characters.")
     }
 }
