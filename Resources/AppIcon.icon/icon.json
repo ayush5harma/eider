@@ -1,0 +1,90 @@
+{
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.48627,0.79608,0.91765,1.00000",
+          "srgb:0.16471,0.42745,0.69020,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1
+          }
+        }
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.13333,0.21176,0.29412,1.00000",
+          "srgb:0.04706,0.08627,0.13725,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1
+          }
+        }
+      }
+    }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "bill.svg",
+          "name" : "bill"
+        },
+        {
+          "glass" : false,
+          "image-name" : "eye.svg",
+          "name" : "eye"
+        },
+        {
+          "glass" : true,
+          "image-name" : "cap.svg",
+          "name" : "cap"
+        },
+        {
+          "glass" : true,
+          "image-name" : "nape.svg",
+          "name" : "nape"
+        },
+        {
+          "glass" : true,
+          "image-name" : "flank.svg",
+          "name" : "flank"
+        },
+        {
+          "glass" : true,
+          "image-name" : "body.svg",
+          "name" : "body"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.40000000000000002
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}
