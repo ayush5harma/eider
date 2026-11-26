@@ -293,8 +293,24 @@ static CFStringRef item_class(CFDictionaryRef q) {
     return c ? (CFStringRef)c : kSecClassGenericPassword;
 }
 
+// Security names every key that is a request rather than an attribute with
+// a prefix: "u_" use (kSecUseNoAuthenticationUI is "u_NoAuthUI"), "m_" match,
+// "r_" return, "v_" value; attributes are four-letter codes ("acct", "svce",
+// "agrp", "pdmn"). Read from the macOS 27.3 SDK's constants, 2026-11-27. A
+// flag missing from the list below used to be matched as an attribute no item
+// has, so a query carrying kSecUseNoAuthenticationUI, kSecUseKeychain,
+// kSecMatchHostOrSubdomainOfHost or a kSecMatchSubject* key never found the
+// item it had stored, and the app saw a signed-out state at every launch.
+static bool is_request_flag(CFTypeRef key) {
+    if (CFGetTypeID(key) != CFStringGetTypeID() || CFStringGetLength(key) < 3) return false;
+    UniChar c[2];
+    CFStringGetCharacters(key, CFRangeMake(0, 2), c);
+    return c[1] == '_' && (c[0] == 'u' || c[0] == 'm' || c[0] == 'r' || c[0] == 'v');
+}
+
 // Keys in a query that do not describe the item.
 static bool ignored_key(CFTypeRef key) {
+    if (is_request_flag(key)) return true;
     static CFTypeRef ignore[64]; static int n = -1;
     if (n < 0) {
         n = 0;
