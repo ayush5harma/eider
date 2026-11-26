@@ -1,6 +1,6 @@
 cask "eider" do
-  version "0.1.6"
-  sha256 "8bf8c9a98168bf022164a54c89746900f92bfbeeb12ed660ebc3498ecf5de938"
+  version "0.1.7"
+  sha256 "befea0d36524ea8cd13489a958c6866d74b345d2b2e42e1dbe07e9172a6ea872"
 
   url "https://github.com/ayush5harma/eider/releases/download/v#{version}/Eider-#{version}.zip"
   name "Eider"
