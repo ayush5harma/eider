@@ -143,7 +143,8 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   checks `uncaught_exception` first (an exception line proves the app ran past
   dyld and code signing); it is given the Mach-O file names in the bundle so
   the summary can name the binary whose frame threw. A process that stays up
-  is checked once more: if its window holds nothing but container groups
+  is checked once more: if its window holds nothing but its title bar and
+  container groups (an alert sheet or a toolbar counts as content)
   (`WindowContent`, through the Accessibility API, so only with that
   permission) and its log shows UIKit's "whose view is not in the window
   hierarchy", the answer is `window_not_attached`, with the app left running.
