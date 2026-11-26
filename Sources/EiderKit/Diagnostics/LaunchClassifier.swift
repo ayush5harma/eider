@@ -96,19 +96,35 @@ public enum LaunchClassifier {
                 summary: "The app could not use the keychain (error -34018, no keychain access group); reinstall it without --no-keychain so the keychain shim is linked.",
                 evidence: evidence(hit))
         }
-        if let hit = first(lines, matching: ["System Policy:"], process: processName) {
+        if let hit = refusals(lines, matching: ["System Policy:"], process: processName) {
             return LaunchDiagnosis(
                 code: .systemPolicy,
                 summary: "macOS denied the app access to a protected location (System Policy), usually an app-group folder; reinstall with this version of Eider, or grant the app Full Disk Access.",
                 evidence: evidence(hit))
         }
-        if let hit = first(lines, matching: ["Sandbox:", "com.apple.sandbox.reporting"], process: processName) {
+        if let hit = refusals(lines, matching: ["Sandbox:", "com.apple.sandbox.reporting"], process: processName) {
             return LaunchDiagnosis(
                 code: .sandboxDenial,
                 summary: "The app's sandbox refused something it tried to do (see the evidence); it may need an entitlement that Eider does not grant.",
                 evidence: evidence(hit))
         }
         return nil
+    }
+
+    /// Kernel denials that refused the app's own process. The kernel names the
+    /// refused process as "<name>(<pid>) deny"; a line that merely contains
+    /// the app's name is often another process touching the app's files
+    /// (ReportCrashService, dasd and mds read the bundle after every launch,
+    /// many with "allow"), which the 2026-11-27 sweep took for LiveContainer's
+    /// own denial when it had crashed for another reason.
+    private static func refusals(_ lines: [String], matching needles: [String], process: String?) -> [String]? {
+        let refused = process.map { try! NSRegularExpression(pattern: "(^|[^A-Za-z0-9_.-])" + NSRegularExpression.escapedPattern(for: $0) + #"\(\d+\) deny"#) }
+        let hits = lines.filter { line in
+            guard needles.contains(where: line.contains) else { return false }
+            guard let refused else { return line.contains(" deny") }
+            return refused.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
+        }
+        return hits.isEmpty ? nil : hits
     }
 
     // MARK: Uncaught exceptions
