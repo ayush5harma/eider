@@ -66,7 +66,7 @@ struct AppDetailView: View {
 
     /// Beside the button: what Install would bring, or how the installed copy stands.
     @ViewBuilder private func statusLine(_ latest: CatalogVersion) -> some View {
-        switch model.status(of: app) {
+        switch model.status(of: entry) {
         case .notInstalled:
             Text(detail(of: latest).isEmpty ? "Version \(latest.version)" : "Version \(latest.version) · \(detail(of: latest))")
                 .font(.callout).foregroundStyle(.secondary)

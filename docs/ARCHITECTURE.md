@@ -75,25 +75,33 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   app's id. Names and versions pass through `DisplayText` at the model boundary.
 - A bundle at the install destination is replaced only if the library recorded
   it or `force` is set, and the old copy goes to the Trash, never deleted.
-- Entries sharing a bundle id within a source are merged into one `CatalogApp`
-  (`CatalogMerge`, called by `SourceParser.parse` and when `SourceStore` loads a
-  copy saved before merging), so `SourcedApp.id` ("<source url>|<bundle id>") is
-  unique per source; `allApps()` suffixes `#2`, `#3` should a hand-edited file
-  still collide. "Newest version" is one rule, `CatalogVersion.ranksAbove`, used
+- Entries sharing a bundle id and a name within a source are merged into one
+  `CatalogApp` (`CatalogMerge`, called by `SourceParser.parse` and when
+  `SourceStore` loads a copy saved before merging); a bundle id is not an
+  app's identity (tweak sources list many apps under one). `SourcedApp.id` is
+  "<source url>|<bundle id>", plus "|<name>" where the source lists several
+  names under that id (`SourcedApp.entries(of:)`), so it is unique per source;
+  `allApps()` suffixes `#2`, `#3` should a hand-edited file still collide.
+  `CatalogSource.mergeRule` records the rule a copy was merged under; one with
+  another rule (or none) is refetched at launch and by `eider source refresh`. "Newest version" is one rule, `CatalogVersion.ranksAbove`, used
   by the merged order, installs and `UpdateChecker`: numeric versions by number,
   never a hash or label above a number, date only as a late tie-break
   (docs/SOURCES.md).
 - Provenance and update matching. A catalog install or update records an
   optional `InstallOrigin` on the library entry: the source's address and the
-  entry id as the source lists it. The listed id may differ from the IPA's own
+  entry id and name as the source lists them. The listed id may differ from the IPA's own
   (an entry listed as "com.kdt.l!vecontainer" installs as
   "com.kdt.livecontainer"), so the origin is the only link back to the entry.
-  Both strings are data, compared with the catalog and never made into a path.
-  The key is absent in entries written before it, and those load unchanged;
+  The strings are data, compared with the catalog and never made into a path.
+  The key is absent in entries written before it, and those load unchanged
+  (an origin without a name matches the id's only entry, or the entry named like
+  the installed app);
   a file or plain-address install has none. `UpdateChecker` takes, per
   installed app, the origin's entry if that source is still added and still
-  lists it; otherwise, for an old entry, the entries with its bundle id in the
-  source it recorded; otherwise every entry with its bundle id in any source.
+  lists it (id and name); otherwise, for an old entry, the entries with its
+  bundle id in the source it recorded; otherwise the entries with its bundle id
+  in any source that lists one name under that id (where several apps share an
+  id, which of them this is cannot be told, so nothing is offered).
   A known origin is never widened to other sources. The offer is the
   candidate version that `ranksAbove` the rest, only if it is newer than the
   installed version (`AppVersion.isNewer`), and it names the source and entry

@@ -16,8 +16,11 @@ struct SourceSummary: Encodable {
     let name: String
     let format: String
     let apps: Int
-    /// Entries the document listed, present only when some shared a bundle id and were merged.
+    /// Entries the document listed, present only when some shared a bundle id and a name and were merged.
     let entries: Int?
+    /// Saved by 0.1.2 to 0.1.6, which merged apps that only share a bundle id: some apps are
+    /// missing until `eider source refresh`.
+    let needsRefresh: Bool
     let fetchedAt: Date
     let warnings: [String]
 
@@ -27,6 +30,7 @@ struct SourceSummary: Encodable {
         format = source.format.rawValue
         apps = source.apps.count
         entries = source.entryCount
+        needsRefresh = source.isOverMerged
         fetchedAt = source.fetchedAt
         warnings = source.warnings
     }

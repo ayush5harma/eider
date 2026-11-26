@@ -31,6 +31,18 @@ extension AppModel {
         selectedAppID.flatMap { browseIndex.byID[$0] }
     }
 
+    /// The status of one listed entry. The library holds one app per bundle id, and a
+    /// tweak source lists many apps under one id, so an installed copy that came from
+    /// a differently named entry of the same source is not this entry.
+    public func status(of entry: SourcedApp) -> InstallStatus {
+        if let origin = installedByBundleID[entry.app.bundleID]?.origin,
+           let name = origin.entryName, origin.sourceURL == entry.sourceURL,
+           origin.entryID == entry.app.bundleID, CatalogApp.nameKey(name) != entry.app.nameKey {
+            return .notInstalled
+        }
+        return status(of: entry.app)
+    }
+
     public func status(of app: CatalogApp) -> InstallStatus {
         guard let local = installedByBundleID[app.bundleID] else { return .notInstalled }
         if let update = updates[app.bundleID] {

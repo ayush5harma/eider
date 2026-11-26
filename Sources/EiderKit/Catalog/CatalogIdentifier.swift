@@ -27,6 +27,15 @@ public enum CatalogIdentifier {
         !text.isEmpty && !isTooLong(text) && !DisplayText.containsUnsafe(text)
     }
 
+    /// Whether `text` could be a full entry id (`SourcedApp.id`): a source address,
+    /// a bundle id and maybe a name, so longer than a bundle id may be. Only compared.
+    public static func isListableEntryID(_ text: String) -> Bool {
+        text.contains("|") && text.utf8.count <= maxEntryIDBytes && !DisplayText.containsUnsafe(text)
+    }
+
+    /// An address and a name on top of a bundle id.
+    static let maxEntryIDBytes = 4096
+
     /// The id as given, minus what `DisplayText` removes; nil when nothing is left.
     static func cleaned(_ raw: String?) -> String? {
         guard let raw else { return nil }

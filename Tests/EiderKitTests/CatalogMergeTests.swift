@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import EiderKit
 
-/// Entries that share a bundle id within one source are one app; see `CatalogMerge`.
+/// Entries that share a bundle id and a name within one source are one app; see `CatalogMerge`.
 final class CatalogMergeTests: XCTestCase {
     private let sourceURL = URL(string: "https://example.com/repo.json")!
 
@@ -40,11 +40,11 @@ final class CatalogMergeTests: XCTestCase {
 
     func testAppFieldsComeFromTheEntryWithTheNewestVersionAndFallBackToTheFirstNonEmpty() throws {
         let source = try parse([
-            entry("com.a", name: "Old Name", version: "1.0", extra: #","developerName":"Old Dev","subtitle":"Old sub","category":"games""#),
-            entry("com.a", name: "New Name", version: "2.0", extra: #","subtitle":"New sub""#),
+            entry("com.a", name: "my app", version: "1.0", extra: #","developerName":"Old Dev","subtitle":"Old sub","category":"games""#),
+            entry("com.a", name: "My App", version: "2.0", extra: #","subtitle":"New sub""#),
         ])
         let app = try XCTUnwrap(source.apps.first)
-        XCTAssertEqual(app.name, "New Name")
+        XCTAssertEqual(app.name, "My App")
         XCTAssertEqual(app.subtitle, "New sub")
         XCTAssertEqual(app.developerName, "Old Dev", "the newest entry has none, so the first that does")
         XCTAssertEqual(app.category, "games")
@@ -52,8 +52,8 @@ final class CatalogMergeTests: XCTestCase {
 
     func testEachVersionKeepsItsOwnNotesAndAddress() throws {
         let source = try parse([
-            entry("com.a", name: "One", version: "1.0", notes: "first notes", url: "https://cdn.example.com/a1.ipa"),
-            entry("com.a", name: "Two", version: "2.0", notes: "second notes", url: "https://cdn.example.com/a2.ipa"),
+            entry("com.a", version: "1.0", notes: "first notes", url: "https://cdn.example.com/a1.ipa"),
+            entry("com.a", version: "2.0", notes: "second notes", url: "https://cdn.example.com/a2.ipa"),
         ])
         let versions = try XCTUnwrap(source.apps.first).versions
         XCTAssertEqual(versions.map(\.notes), ["second notes", "first notes"])

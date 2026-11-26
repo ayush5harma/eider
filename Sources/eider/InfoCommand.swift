@@ -5,7 +5,7 @@ import Foundation
 struct InfoCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "info", abstract: "Show what a source offers for an app, and whether it is installed.")
 
-    @Argument(help: "The app's bundle id.")
+    @Argument(help: "The app's bundle id, or its full entry id when several apps share the bundle id.")
     var bundleID: String
 
     @OptionGroup var common: CommonOptions
@@ -23,10 +23,10 @@ struct InfoCommand: AsyncParsableCommand {
     func run() async throws {
         try await common.guarded { output in
             let operations = AppOperations()
-            guard let entry = try await operations.catalogEntry(bundleID: bundleID) else {
+            guard let entry = try await operations.catalogEntry(matching: bundleID) else {
                 throw output.fail(FailureReport(code: "operations.not_in_catalog", message: "None of your sources lists \(bundleID)."))
             }
-            let installed = try await operations.library.app(bundleID: bundleID)
+            let installed = try await operations.library.app(bundleID: entry.app.bundleID)
             output.result(Payload(app: entry.app, source: entry.sourceURL.absoluteString, installed: installed), text: Self.text(entry, installed))
         }
     }

@@ -8,7 +8,7 @@ struct InstallCommand: AsyncParsableCommand {
         abstract: "Install an app from a decrypted .ipa, an https address or a source, as a Mac app."
     )
 
-    @Argument(help: "A .ipa file, an https address of one, or the bundle id of an app in your sources.")
+    @Argument(help: "A .ipa file, an https address of one, the bundle id of an app in your sources, or its full entry id when several share the bundle id.")
     var target: String
 
     @Option(help: "Install this version (bundle id installs only; default is the newest).")
@@ -71,7 +71,7 @@ struct InstallCommand: AsyncParsableCommand {
             case .address(let url):
                 app = try await operations.install(ipaURL: url, options: options, onEvent: onEvent)
             case .catalog(let id):
-                guard let entry = try await operations.catalogEntry(bundleID: id) else {
+                guard let entry = try await operations.catalogEntry(matching: id) else {
                     throw OperationFailure.notInCatalogForCLI(id)
                 }
                 let release = try version.map { try AppOperations.version($0, of: entry.app) }
@@ -95,12 +95,15 @@ struct InstallCommand: AsyncParsableCommand {
         )
     }
 
-    /// An address (or an `eider://install/` link) first; then anything that looks
+    /// An entry id ("<source address>|<bundle id>[|<name>]", what `eider search --json`
+    /// and the ambiguity message print) first, since it starts with an address
+    /// but is not one; then an address (or an `eider://install/` link); then anything that looks
     /// like a path (it has a slash or ends in `.ipa`), whether or not it exists, so a
     /// typo is a missing file, not a bundle id; the rest is a bundle id. A file that
     /// happens to share a bundle id's name in the current directory does not win:
     /// `eider install com.example.app` once installed whatever file was lying there.
     static func resolve(_ text: String) -> Source {
+        if text.contains("|") { return .catalog(text) }
         if let url = URL(string: text), let scheme = url.scheme?.lowercased() {
             if scheme == "eider", case .install(let inner)? = DeepLink.parse(url) { return .address(inner) }
             if scheme == "https" || scheme == "http" || scheme == "file" { return .address(url) }

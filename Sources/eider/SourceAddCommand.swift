@@ -15,7 +15,7 @@ struct SourceAddCommand: AsyncParsableCommand {
             let warnings = source.warnings.map { "warning: \($0)" }
             var lines = ["Added \(source.name): \(source.apps.count) app(s)"]
             if let entries = source.entryCount {
-                lines.append("\(entries) entries listed; those sharing a bundle id were merged into one app each.")
+                lines.append("\(entries) entries listed; those sharing a bundle id and a name were merged into one app each.")
             }
             output.result(
                 SourceSummary(source),

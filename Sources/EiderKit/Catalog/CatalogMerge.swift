@@ -23,22 +23,40 @@ extension CatalogVersion {
     }
 }
 
-/// Sources in the wild list one app as several entries with the same bundle id
-/// (one per version: 1Blocker ten times, in a 17,430-entry source). Browsing
-/// every copy and identifying a row by "<source>|<bundle id>" made rows collide,
-/// so entries that share a bundle id within one source become one app here.
-/// Different sources stay separate: the owner chooses which one to trust.
+/// Sources in the wild list one app as several entries (one per version: 1Blocker
+/// ten times, in a 17,444-entry source), so entries that share a bundle id AND a
+/// name within one source become one app here. Different sources stay separate:
+/// the owner chooses which one to trust.
+///
+/// The name is part of the rule because a bundle id is not an app's identity in
+/// a tweak source: the same source lists 211 entries under com.google.ios.youtube
+/// as 152 different apps (YouTubeOLED, YTPlus, YTKACE, ...). Merging by id alone
+/// (0.1.2 to 0.1.6) swallowed about 7,500 of its entries. Names are compared
+/// trimmed, whitespace-collapsed and case-insensitively (`CatalogApp.nameKey`).
 enum CatalogMerge {
-    /// The apps with entries sharing a bundle id merged, at the position of the
-    /// first of them. An app listed once is returned untouched.
+    /// Bumped whenever the merge rule changes what a saved source holds. A saved
+    /// source carries the rule it was merged with (`CatalogSource.mergeRule`);
+    /// one that carries another (or none: 0.1.2 to 0.1.6 wrote none, and merged
+    /// by bundle id alone) is refetched, because the entries the old rule folded
+    /// away are gone from the file and cannot be split again.
+    static let rule = 2
+
+    private struct Key: Hashable {
+        let bundleID: String
+        let name: String
+    }
+
+    /// The apps with entries sharing a bundle id and a name merged, at the
+    /// position of the first of them. An app listed once is returned untouched.
     static func merging(_ apps: [CatalogApp]) -> [CatalogApp] {
-        var slot: [String: Int] = [:]
+        var slot: [Key: Int] = [:]
         var groups: [[CatalogApp]] = []
         for app in apps {
-            if let index = slot[app.bundleID] {
+            let key = Key(bundleID: app.bundleID, name: app.nameKey)
+            if let index = slot[key] {
                 groups[index].append(app)
             } else {
-                slot[app.bundleID] = groups.count
+                slot[key] = groups.count
                 groups.append([app])
             }
         }
@@ -47,7 +65,8 @@ enum CatalogMerge {
     }
 
     /// The source with its entries merged. `entryCount` records how many entries
-    /// the document listed, but only when some were merged.
+    /// the document listed, but only when some were merged. Does not stamp the
+    /// rule: only a fresh parse (`SourceParser.parse`) may claim to have applied it.
     static func normalized(_ source: CatalogSource) -> CatalogSource {
         let merged = merging(source.apps)
         guard merged.count != source.apps.count else { return source }

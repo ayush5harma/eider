@@ -4,9 +4,11 @@ public enum SourceParser {
     /// Detects the format and returns the vetted catalog. `url` is where the
     /// bytes came from: relative addresses resolve against it, and a file URL
     /// there is what lets the document point at local files. Entries that share
-    /// a bundle id are merged into one app (`CatalogMerge`).
+    /// a bundle id and a name are merged into one app (`CatalogMerge`).
     public static func parse(data: Data, from url: URL, now: Date = Date()) throws -> CatalogSource {
-        CatalogMerge.normalized(try parseEntries(data: data, from: url, now: now))
+        var source = CatalogMerge.normalized(try parseEntries(data: data, from: url, now: now))
+        source.mergeRule = CatalogMerge.rule
+        return source
     }
 
     private static func parseEntries(data: Data, from url: URL, now: Date) throws -> CatalogSource {
