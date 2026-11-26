@@ -10,12 +10,14 @@
 //   swift Scripts/make-icon.swift Resources
 //
 // The picture is an abstract mark taken from the drake common eider's bill,
-// full bleed in the squircle: the bill as one amber wedge sweeping from the
+// full bleed in the squircle: the bill as one wedge sweeping from the
 // top-left corner to a rounded tip near the bottom-right, its top line
-// (culmen) dead straight as the eider's forehead-to-tip line is; the pale
-// lobe the bill sends up into the forehead as a lime leaf crossing that line;
-// the black cap as the ink ground; the sea-green nape as the plane below, with
-// a sliver of ink between it and the bill where the bill closes. No eye, no
+// (culmen) dead straight as the eider's forehead-to-tip line is; the lobe the
+// bill sends up into the forehead as a leaf crossing that line; the cap as
+// the ground; the nape as the plane below, with a sliver of ground between it
+// and the bill where the bill closes. The colours are the owner's pick of six
+// palettes, "Sunset": orange-to-pink bill, gold lobe, violet nape on plum,
+// each a touch deeper in the Dark appearance. No eye, no
 // head outline: a mark first, a bill second. (0.1.0 drew a feather and 0.1.3
 // a whole drake; both were dropped for this.) Three layers in two glass
 // groups; the system supplies the depth.
@@ -56,7 +58,7 @@ func roundConvex(_ path: CGPath, _ r: CGFloat) -> CGPath {
 // box so the SVGs stay small. The system clips to the squircle anyway.
 let bleed = CGPath(rect: CGRect(x: -40, y: -40, width: 1104, height: 1104), transform: nil)
 
-// MARK: - Palette (the drake's head, pushed vivid)
+// MARK: - Palette ("Sunset")
 
 // A two-stop linear gradient. start/stop are in the unit square with y DOWN,
 // Icon Composer's convention, so the same values feed icon.json and the icns.
@@ -67,13 +69,16 @@ struct Fill {
     var stop = p(0.5, 1)
 }
 
-let amber = Fill(from: 0xFFE27A, to: 0xFF9F1C, start: p(0.2, 0.1), stop: p(0.9, 0.8))
-let amberDark = Fill(from: 0xFFD55C, to: 0xF08A12, start: p(0.2, 0.1), stop: p(0.9, 0.8))
-let lime = Fill(from: 0xEEFF9A, to: 0xA8E04A)
-let sea = Fill(from: 0x7FF2D2, to: 0x14A8A0, start: p(0.2, 0), stop: p(0.8, 1))
-let seaDark = Fill(from: 0x52D9BC, to: 0x0E7F86, start: p(0.2, 0), stop: p(0.8, 1))
-let ink = Fill(from: 0x24345C, to: 0x0B1226, start: p(0.3, 0), stop: p(0.7, 1))
-let inkDark = Fill(from: 0x141C30, to: 0x05080F, start: p(0.3, 0), stop: p(0.7, 1))
+// Dark fills are the light ones at 86% brightness, so the hues sit on the
+// darker ground without glowing.
+let billFill = Fill(from: 0xFFB347, to: 0xFF4E88, start: p(0.2, 0.1), stop: p(0.9, 0.8))
+let billFillDark = Fill(from: 0xDB993D, to: 0xDB4374, start: p(0.2, 0.1), stop: p(0.9, 0.8))
+let lobeFill = Fill(from: 0xFFEE8A, to: 0xFFC531)
+let lobeFillDark = Fill(from: 0xDBCC76, to: 0xDBA92A)
+let napeFill = Fill(from: 0xB287FF, to: 0x6B3FE4, start: p(0.2, 0), stop: p(0.8, 1))
+let napeFillDark = Fill(from: 0x9974DB, to: 0x5C36C4, start: p(0.2, 0), stop: p(0.8, 1))
+let ground = Fill(from: 0x5A1D55, to: 0x1F0822, start: p(0.3, 0), stop: p(0.7, 1))
+let groundDark = Fill(from: 0x34102F, to: 0x10040F, start: p(0.3, 0), stop: p(0.7, 1))
 
 // MARK: - The mark, in the 1024 pt layer canvas (y up; the system maps it onto the squircle)
 
@@ -117,7 +122,7 @@ func mark() -> [Group] {
     lobe.closeSubpath()
 
     // The nape: its top edge runs just under the gape, leaving a sliver of
-    // ink between them that widens towards the tip.
+    // ground between them that widens towards the tip.
     let nape = CGMutablePath()
     nape.move(to: p(-120, -120))
     nape.addLine(to: p(-120, 340))
@@ -127,11 +132,11 @@ func mark() -> [Group] {
 
     return [
         Group(layers: [
-            Layer(name: "nape", path: nape.intersection(bleed), fill: sea, dark: seaDark),
+            Layer(name: "nape", path: nape.intersection(bleed), fill: napeFill, dark: napeFillDark),
         ], translucency: 0.3),
         Group(layers: [
-            Layer(name: "bill", path: billPath, fill: amber, dark: amberDark),
-            Layer(name: "lobe", path: roundConvex(lobe, 60).intersection(bleed), fill: lime, dark: lime, opacity: 0.8),
+            Layer(name: "bill", path: billPath, fill: billFill, dark: billFillDark),
+            Layer(name: "lobe", path: roundConvex(lobe, 60).intersection(bleed), fill: lobeFill, dark: lobeFillDark, opacity: 0.92),
         ], translucency: 0.35),
     ]
 }
@@ -194,8 +199,8 @@ func writeIconBundle(_ groups: [Group], to bundle: URL) throws {
     // Icon Composer lists groups and layers front first.
     let json: [String: Any] = [
         "fill-specializations": [
-            ["value": gradientValue(ink)],
-            ["appearance": "dark", "value": gradientValue(inkDark)],
+            ["value": gradientValue(ground)],
+            ["appearance": "dark", "value": gradientValue(groundDark)],
         ],
         "groups": groups.reversed().map { g in
             [
@@ -265,14 +270,14 @@ func render(_ groups: [Group], size: Int) -> CGImage {
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -s * 10 / 1024), blur: s * 22 / 1024, color: rgb(0, 0.32))
     ctx.addPath(tilePath)
-    ctx.setFillColor(rgb(ink.to))
+    ctx.setFillColor(rgb(ground.to))
     ctx.fillPath()
     ctx.restoreGState()
 
     ctx.saveGState()
     ctx.addPath(tilePath)
     ctx.clip()
-    fillGradient(ctx, ink, over: tile)
+    fillGradient(ctx, ground, over: tile)
 
     // The layers were drawn for the full canvas, which the system maps onto the tile.
     ctx.translateBy(x: tile.minX, y: tile.minY)
@@ -285,7 +290,7 @@ func render(_ groups: [Group], size: Int) -> CGImage {
         ctx.saveGState()
         ctx.setShadow(offset: CGSize(width: 0, height: -s * 10 / 1024), blur: s * 26 / 1024, color: rgb(0x050A18, 0.4))
         ctx.addPath(silhouette)
-        ctx.setFillColor(rgb(ink.to))
+        ctx.setFillColor(rgb(ground.to))
         ctx.fillPath()
         ctx.restoreGState()
 
