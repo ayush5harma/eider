@@ -183,6 +183,7 @@ final class OperationsTests: XCTestCase {
         _ = try await ops.sources.add(url: sourceURL)
         var original = InstallOptions(destination: URL(fileURLWithPath: "/tmp/eider-apps"), macIdiom: true, keychainShim: false)
         original.resetData = true
+        original.interfaceScale = .percent115
         try await ops.library.record(installedApp(version: "1.0", options: original))
 
         let updated = try await ops.update(bundleID: "com.x")
@@ -192,6 +193,7 @@ final class OperationsTests: XCTestCase {
         XCTAssertEqual(options.destination.path, "/tmp/eider-apps")
         XCTAssertTrue(options.macIdiom)
         XCTAssertFalse(options.keychainShim)
+        XCTAssertEqual(options.interfaceScale, .percent115, "the interface size survives an update")
         XCTAssertFalse(options.resetData, "an update never wipes the app's data")
         XCTAssertEqual(options.sourceURL, sourceURL)
         XCTAssertTrue(StubURLProtocol.requests.contains { $0.url?.lastPathComponent == "com.x-2.0.ipa" })
