@@ -142,7 +142,15 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   `LaunchClassifier` is a pure function over log and crash-report lines and
   checks `uncaught_exception` first (an exception line proves the app ran past
   dyld and code signing); it is given the Mach-O file names in the bundle so
-  the summary can name the binary whose frame threw.
+  the summary can name the binary whose frame threw. A process that stays up
+  is checked once more: if its window holds nothing but container groups
+  (`WindowContent`, through the Accessibility API, so only with that
+  permission) and its log shows UIKit's "whose view is not in the window
+  hierarchy", the answer is `window_not_attached`, with the app left running.
+  Either signal alone is common in apps that work (a game draws into one view
+  with no accessible content; the warning is often harmless), so both are
+  required, and the window is read first so a window with content never pays
+  for a log query.
 - No code is copied from Feather, PlayCover or PlayTools (GPL and AGPL); this
   repository is MIT.
 
@@ -158,8 +166,9 @@ shim change:
    It must be an instance method returning BOOL with no arguments.
 2. Prove it by effect on a scratch install: force the getter in a debugger or
    with a throwaway row, open the app through `open`, and compare what it
-   shows (`eider doctor`, the accessibility element count of its window)
-   with and without the row.
+   shows (`eider doctor`, or what its window holds through the Accessibility
+   API; System Events' "entire contents" answered 0 for every Catalyst window
+   on macOS 27.3) with and without the row.
 3. Add the row with `why`: what goes wrong without it and what was measured,
    with the app version and the date. `AppQuirksTests` checks its shape.
 4. Reinstall the app: rows are written at install time, so an installed copy
@@ -168,7 +177,9 @@ shim change:
 `eider doctor` reports `window_not_attached` for the most common case seen so
 far, a window left empty by a launch sequence that ran before Catalyst's late
 first scene; that diagnosis asks the user to report the app so a row can be
-added.
+added. There is no generic remedy: which controller belongs in the window is
+the app's own private state, and attaching a guessed one could break an app
+that works, so none is offered even behind an option.
 
 ## Reference implementation
 
