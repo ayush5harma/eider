@@ -198,6 +198,13 @@ final class InstallRun: @unchecked Sendable {
         for (shim, label) in wanted {
             added.append(try linker.link(try shims.url(for: shim), as: shim.rawValue, installName: shim.installName, label: label))
         }
+        if wanted.contains(where: { $0.shim == .quirks }) {
+            let rows = AppQuirks.rows(for: identity.shippedID)
+            do { try AppQuirks.write(rows, into: app) } catch {
+                throw InstallFailure(.badBundle, "Could not write the app's quirk table: \(error.localizedDescription)")
+            }
+            emit(.link, "Applying \(rows.count) workaround(s) for \(identity.shippedID)", 0.68)
+        }
         for extra in extras {
             let installName = "@executable_path/Frameworks/\(extra.name)"
             added.append(try linker.link(extra.source, as: extra.name, installName: installName, label: extra.name) { copy in

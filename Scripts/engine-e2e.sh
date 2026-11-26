@@ -15,7 +15,12 @@
 #               container, a keychain item survives a relaunch, and after a
 #               kill -9 a keychain item with a shared access group and the
 #               app group's preferences (NSUserDefaults and the CFPreferences
-#               C API, written on the group's first launch) are read back
+#               C API, written on the group's first launch) are read back,
+#               as are the group's preferences seen as a persistent domain, an
+#               unsigned group's suite, a SQLite database and a coordinated
+#               file in the group's folder, and a synchronizable keychain item
+#               found with query flags that describe no item, then updated
+#               and deleted by access group
 #   mac idiom   --mac-idiom runs the app in the Mac idiom, and a prebuilt
 #               --dylib is linked and loads
 # plus: the registry holds the app, and uninstall removes it.
@@ -92,6 +97,10 @@ echo "Building eider, the shims and the probe ..."
 BIN="$(cd "$ROOT" && swift build --show-bin-path)/eider"
 "$ROOT/Scripts/build-shims.sh" >"$W/shims.log" 2>&1 || { cat "$W/shims.log"; echo "build-shims failed"; exit 2; }
 PROBE_APP_GROUP="$GROUP" "$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe.ipa" >/dev/null || { echo "could not build the probe (needs Xcode's iOS SDK)"; exit 2; }
+for mode in blank detached; do
+  PROBE_APP_GROUP="$GROUP" PROBE_WINDOW=$mode "$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe-$mode.ipa" >/dev/null \
+    || { echo "could not build the $mode-window probe"; exit 2; }
+done
 xcrun clang -target arm64-apple-ios14.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -dynamiclib \
   -install_name @rpath/extra.dylib -o "$W/extra.dylib" "$ROOT/legacy/test/extra.c" || { echo "could not build the extra dylib"; exit 2; }
 unzip -q -o "$W/probe.ipa" 'Payload/Probe.app/Probe' -d "$W/x"
@@ -156,6 +165,8 @@ check "keychain shim linked" links libipakeychain.dylib
 check "CallKit shim linked (the probe links CallKit)" links libipacallkit.dylib
 check "camera shim linked (the probe links AVFoundation)" links libipacamera.dylib
 check "app-group shim linked" links libipagroups.dylib
+check "quirks shim linked (the probe has rows in the quirk table)" links libipaquirks.dylib
+check "the probe's quirk rows are written into the bundle" grep -qF probeQuirkSwitch "$APP/EiderQuirks.plist"
 check "embedded.mobileprovision removed" test ! -e "$APP/embedded.mobileprovision"
 check "bundle signature verifies" codesign --verify --strict "$APP"
 check "no quarantine attribute left" no_quarantine
@@ -164,12 +175,18 @@ if launch; then
   check "shipped idiom (iPad, 1)" logged ' launch idiom=1 '
   check "embedded framework loaded" logged 'probekit ok'
   check "GL lookup answers OpenGL ES, not desktop libGL" logged 'gl lookup=OpenGLES '
+  check "a quirk row forced the BOOL getter and left the NSInteger getter alone" logged 'quirk switch=1 count=7$'
+  check "the signature's team id answers the keychain shim's seed, not nothing" logged 'teamid=[A-Z0-9]{10} seed=[A-Z0-9]{10} same=1$'
   check "keychain item stored (shim)" logged 'keychain miss=.* add=0 '
   check "app-group folder is in the container and writable" \
     logged 'group write=1 path=.*/Library/Containers/[^/]+/Data/Library/Group Containers/group\.ipa\.probe\.shared '
   check "shared-access-group keychain item stored (shim)" logged 'keychain-shared miss=.* add=0 '
   check "app-group preferences written on the group's first launch (NSUserDefaults)" logged 'groupdefaults miss add=g-'
   check "app-group preferences written on the group's first launch (CFPreferences)" logged 'groupcf miss add=g-'
+  check "flagged keychain item stored (synchronizable, access group, AfterFirstUnlockThisDeviceOnly)" logged 'keychain-flags miss=.* add=0 '
+  check "an unsigned group's preferences written" logged 'unsigned miss add=q-'
+  check "SQLite database written in the app group's folder" logged 'groupsql miss add=q-[0-9]+ rc=0'
+  check "coordinated file written in the app group's folder" logged 'groupcoord miss add=q-[0-9]+ wrote=1'
 else
   bad "the probe did not launch"
 fi
@@ -180,6 +197,14 @@ if launch; then
   check "shared-access-group keychain item read back after kill -9 and relaunch" logged 'keychain-shared read=s-'
   check "app-group preferences read back after kill -9 and relaunch (NSUserDefaults)" logged 'groupdefaults read=g-'
   check "app-group preferences read back after kill -9 and relaunch (CFPreferences)" logged 'groupcf read=g-'
+  check "keychain item found with flags that describe no item, then updated and deleted by access group" \
+    logged 'keychain-flags read=f-[0-9]+ pdmn=cku sync=1 update=0 reread=updated delete=0 gone=-25300'
+  check "app-group preferences read back as a persistent domain" logged 'groupdomain probe=g-'
+  check "an unsigned group's preferences read back after kill -9 and relaunch" logged 'unsigned read=q-'
+  check "SQLite database in the app group's folder read back after kill -9 and relaunch" logged 'groupsql read=q-'
+  check "coordinated file in the app group's folder read back after kill -9 and relaunch" logged 'groupcoord read=q-'
+  if logged 'kvs read=q-'; then ok "NSUbiquitousKeyValueStore value read back after kill -9 and relaunch"
+  else skip "NSUbiquitousKeyValueStore did not keep its value (no iCloud entitlement): $(since | grep -E ' kvs ' | tail -n 1)"; fi
 else
   bad "the probe did not relaunch"
 fi
@@ -196,6 +221,28 @@ if launch; then
 else
   bad "the probe did not launch"
 fi
+
+# ── an empty window (replaces the copy again) ───────────────────────────────
+# The probe built to leave its window empty the way YouTube did, and one with
+# content that logs the same UIKit warning. The doctor reads the window
+# through the Accessibility API, which needs the Accessibility permission for
+# the terminal this runs in; without it the empty case is skipped.
+echo "empty window: doctor reports window_not_attached, and only for an empty window"
+doctor_probe() {   # $1 = blank | detached; the doctor's JSON lands in $W/doctor
+  quit_probe
+  eider install "$W/probe-$1.ipa" --dest "$W/apps" --json >"$W/out" 2>"$W/err" || bad "install the $1-window probe: $(cat "$W/err")"
+  eider doctor "$BID" --json >"$W/doctor" 2>&1
+}
+doctor_probe blank
+if grep -qF '"window_not_attached"' "$W/doctor"; then
+  ok "doctor reports window_not_attached for an app whose window stayed empty"
+elif grep -qF '"running":true' "$W/doctor"; then
+  skip "doctor saw the app running but could not read its window (Accessibility permission for this terminal?)"
+else
+  bad "doctor on the blank-window probe: $(tail -n 2 "$W/doctor")"
+fi
+doctor_probe detached
+check "doctor calls an app with content running even when it logs the same warning" grep -qF '"running":true' "$W/doctor"
 
 # ── uninstall ───────────────────────────────────────────────────────────────
 echo "uninstall"

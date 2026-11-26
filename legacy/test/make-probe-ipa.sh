@@ -49,7 +49,7 @@ plist_strings "$APP/Frameworks/ProbeKit.framework/Info.plist" \
 xcrun clang -target "$TARGET" -isysroot "$SDK" -fobjc-arc -fmodules \
   -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations \
   -framework UIKit -framework Foundation -framework Security -framework OpenGLES \
-  -framework CallKit -framework AVFoundation \
+  -framework CallKit -framework AVFoundation -lsqlite3 \
   -Wl,-rpath,@executable_path/Frameworks \
   "$APP/Frameworks/ProbeKit.framework/ProbeKit" \
   -o "$APP/Probe" "$HERE/probe.m"
@@ -68,6 +68,14 @@ plutil -insert UILaunchScreen -json '{}' "$P"
 plutil -insert UIApplicationSceneManifest -json '{"UIApplicationSupportsMultipleScenes":false}' "$P"
 plutil -insert UIRequiresFullScreen -bool true "$P"
 plutil -insert ProbeAppGroup -string "$GROUP" "$P"
+# PROBE_WINDOW=blank: the probe leaves its window empty the way YouTube did;
+# PROBE_WINDOW=detached: content, plus the same UIKit warning (see probe.m).
+# For the doctor's window_not_attached diagnosis and its false-positive guard.
+case "${PROBE_WINDOW:-}" in
+  "") ;;
+  blank|detached) plutil -insert ProbeWindow -string "$PROBE_WINDOW" "$P" ;;
+  *) echo "PROBE_WINDOW must be blank or detached" >&2; exit 2 ;;
+esac
 # Landscape, like the games keymapping is for.
 plutil -insert UISupportedInterfaceOrientations -json \
   '["UIInterfaceOrientationLandscapeLeft","UIInterfaceOrientationLandscapeRight"]' "$P"

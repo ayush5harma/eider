@@ -15,11 +15,22 @@
 //            every later one (the installer's keychain shim, or PlayChain)
 //   keychain-shared  the same with a shared access group in the data
 //            protection keychain, as Google's SSO stores its tokens
+//   teamid   the team id the app reads from its own signature, and whether it
+//            is the seed of the keychain shim's access groups
+//   keychain-flags  a synchronizable item with an access group, read back
+//            with query flags that describe no item, then updated and deleted
+//            by access group
 //   groupdefaults / groupcf  a value in the signed app group's preferences,
 //            through NSUserDefaults(suiteName:) and the CFPreferences C API,
 //            added on the first launch and read back on every later one
+//   groupdomain / unsigned / groupsql / groupcoord / kvs  the group's
+//            preferences as a persistent domain, an unsigned group's suite,
+//            SQLite and coordinated files in the group's folder, and
+//            NSUbiquitousKeyValueStore (see groupStoresRoundTrip)
 //   group    an app group's folder and whether a file could be written in it
 //            (the installer's app-group shim puts it inside the container)
+//   quirk    whether the installer's quirk table reached this app: a BOOL
+//            getter it forces to YES, and an NSInteger getter it must not touch
 //   gl       which image dlsym(RTLD_DEFAULT, "glCreateShader") resolves to
 //            (the probe links OpenGL ES, so the installer adds its redirect)
 //
@@ -28,6 +39,7 @@
 #import <Security/Security.h>
 #import <OpenGLES/ES2/gl.h>
 #include <dlfcn.h>
+#include <sqlite3.h>
 #include <sys/sysctl.h>
 
 static NSString *logPath;
@@ -98,6 +110,33 @@ static void groupContainerWrite(void) {
   plog(@"group write=%d path=%@ error=%@", wrote, dir.path ?: @"(nil)", error.localizedDescription ?: @"none");
 }
 
+// SecTask is in the Security framework but not in the iOS headers.
+typedef struct __SecTask *SecTaskRef;
+extern SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef allocator);
+extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error);
+
+// The team id an app reads from its own signature (LiveContainer crashed on
+// the NULL an ad hoc signature answers), beside the seed the keychain shim
+// puts before every access group it makes up: an app that derives one from
+// the other must see the same ten characters.
+static void teamIdReport(void) {
+  SecTaskRef task = SecTaskCreateFromSelf(NULL);
+  CFTypeRef value = task ? SecTaskCopyValueForEntitlement(task, CFSTR("com.apple.developer.team-identifier"), NULL) : NULL;
+  if (task) CFRelease(task);
+  id answer = (__bridge_transfer id)value;
+  NSString *team = [answer isKindOfClass:NSString.class] ? answer : @"(none)";
+  NSDictionary *query = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                          (__bridge id)kSecAttrService: @"ipa-probe", (__bridge id)kSecAttrAccount: @"probe",
+                          (__bridge id)kSecReturnAttributes: @YES};
+  CFTypeRef attrs = NULL;
+  NSString *seed = @"(none)";
+  if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &attrs) == errSecSuccess) {
+    NSString *group = ((__bridge_transfer NSDictionary *)attrs)[(__bridge id)kSecAttrAccessGroup];
+    seed = [group componentsSeparatedByString:@"."].firstObject ?: @"(none)";
+  }
+  plog(@"teamid=%@ seed=%@ same=%d", team, seed, [team isEqualToString:seed]);
+}
+
 // The app group the probe was signed with (make-probe-ipa.sh records it in
 // Info.plist as ProbeAppGroup), so a test can give each run a fresh group.
 static NSString *signedAppGroup(void) {
@@ -150,6 +189,139 @@ static void sharedKeychainRoundTrip(void) {
   NSMutableDictionary *item = [base mutableCopy];
   item[(__bridge id)kSecValueData] = [value dataUsingEncoding:NSUTF8StringEncoding];
   plog(@"keychain-shared miss=%d add=%d value=%@", (int)rc, (int)SecItemAdd((__bridge CFDictionaryRef)item, NULL), value);
+}
+
+// A synchronizable item with a non-default accessibility and an access
+// group, read back with query flags apps pass that describe no item
+// (kSecUseNoAuthenticationUI, kSecAttrSynchronizableAny, kSecMatchLimitOne),
+// then updated and deleted by a query naming the access group. On the launch
+// after it the item is gone, so the next launch adds it again.
+static void flaggedKeychainRoundTrip(void) {
+  NSDictionary *base = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                         (__bridge id)kSecAttrService: @"ipa-probe-flags", (__bridge id)kSecAttrAccount: @"probe",
+                         (__bridge id)kSecAttrAccessGroup: @"TEAM123456.local.ipa-install-on-mac.flags",
+                         (__bridge id)kSecUseDataProtectionKeychain: @YES};
+  NSMutableDictionary *query = [base mutableCopy];
+  query[(__bridge id)kSecUseNoAuthenticationUI] = @YES;
+  query[(__bridge id)kSecAttrSynchronizable] = (__bridge id)kSecAttrSynchronizableAny;
+  query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+  query[(__bridge id)kSecReturnData] = @YES;
+  query[(__bridge id)kSecReturnAttributes] = @YES;
+  CFTypeRef result = NULL;
+  OSStatus rc = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+  if (rc != errSecSuccess || !result) {
+    NSString *value = [NSString stringWithFormat:@"f-%.0f", NSDate.date.timeIntervalSince1970];
+    NSMutableDictionary *item = [base mutableCopy];
+    item[(__bridge id)kSecAttrSynchronizable] = @YES;
+    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+    item[(__bridge id)kSecValueData] = [value dataUsingEncoding:NSUTF8StringEncoding];
+    plog(@"keychain-flags miss=%d add=%d value=%@", (int)rc, (int)SecItemAdd((__bridge CFDictionaryRef)item, NULL), value);
+    return;
+  }
+  NSDictionary *found = (__bridge_transfer NSDictionary *)result;
+  NSString *v = [[NSString alloc] initWithData:found[(__bridge id)kSecValueData] encoding:NSUTF8StringEncoding];
+  NSMutableDictionary *byGroup = [base mutableCopy];
+  byGroup[(__bridge id)kSecAttrSynchronizable] = (__bridge id)kSecAttrSynchronizableAny;
+  NSDictionary *change = @{(__bridge id)kSecValueData: [@"updated" dataUsingEncoding:NSUTF8StringEncoding]};
+  OSStatus updated = SecItemUpdate((__bridge CFDictionaryRef)byGroup, (__bridge CFDictionaryRef)change);
+  CFTypeRef again = NULL;
+  NSMutableDictionary *dataOnly = [query mutableCopy];
+  [dataOnly removeObjectForKey:(__bridge id)kSecReturnAttributes];
+  OSStatus reread = SecItemCopyMatching((__bridge CFDictionaryRef)dataOnly, &again);
+  NSString *after = reread == errSecSuccess ? [[NSString alloc] initWithData:(__bridge_transfer NSData *)again encoding:NSUTF8StringEncoding] : @"-";
+  OSStatus deleted = SecItemDelete((__bridge CFDictionaryRef)byGroup);
+  OSStatus gone = SecItemCopyMatching((__bridge CFDictionaryRef)dataOnly, NULL);
+  plog(@"keychain-flags read=%@ pdmn=%@ sync=%@ update=%d reread=%@ delete=%d gone=%d", v,
+       found[(__bridge id)kSecAttrAccessible], found[(__bridge id)kSecAttrSynchronizable],
+       (int)updated, after, (int)deleted, (int)gone);
+}
+
+// The rest of what an app keeps under its app group, each added on the first
+// launch and read back on the next:
+//   groupdomain    the group's preferences seen as a persistent domain
+//                  (UserDefaults.persistentDomain(forName:), which Swift code
+//                  uses with removePersistentDomain(forName:) to clear a suite)
+//   unsigned       preferences of a "group." suite the app is NOT signed for,
+//                  as an app whose group id comes from its Info.plist uses
+//   groupsql       a SQLite database (WAL, as Core Data uses) in the group's folder
+//   groupcoord     a file written through NSFileCoordinator in the group's folder
+//   kvs            NSUbiquitousKeyValueStore (no iCloud entitlement here)
+static void groupStoresRoundTrip(void) {
+  NSString *group = signedAppGroup();
+  NSString *value = [NSString stringWithFormat:@"q-%.0f", NSDate.date.timeIntervalSince1970];
+  NSDictionary *domain = [NSUserDefaults.standardUserDefaults persistentDomainForName:group];
+  plog(@"groupdomain probe=%@", domain[@"probe"] ?: @"(none)");
+
+  NSString *unsignedGroup = @"group.local.eider-e2e.unsigned";
+  NSUserDefaults *other = [[NSUserDefaults alloc] initWithSuiteName:unsignedGroup];
+  NSString *stored = [other stringForKey:@"probe"];
+  if (stored) {
+    plog(@"unsigned read=%@", stored);
+  } else {
+    [other setObject:value forKey:@"probe"];
+    plog(@"unsigned miss add=%@ sync=%d", value, [other synchronize]);
+  }
+
+  NSURL *dir = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:group];
+  NSString *db = [dir URLByAppendingPathComponent:@"probe.sqlite"].path;
+  sqlite3 *h = NULL;
+  if (dir && sqlite3_open(db.fileSystemRepresentation, &h) == SQLITE_OK) {
+    sqlite3_exec(h, "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS t (v TEXT)", NULL, NULL, NULL);
+    sqlite3_stmt *st = NULL;
+    NSString *row = nil;
+    if (sqlite3_prepare_v2(h, "SELECT v FROM t LIMIT 1", -1, &st, NULL) == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW)
+      row = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(st, 0)];
+    sqlite3_finalize(st);
+    if (row) {
+      plog(@"groupsql read=%@", row);
+    } else {
+      NSString *sql = [NSString stringWithFormat:@"INSERT INTO t VALUES ('%@')", value];
+      plog(@"groupsql miss add=%@ rc=%d", value, sqlite3_exec(h, sql.UTF8String, NULL, NULL, NULL));
+    }
+    sqlite3_close(h);
+  } else {
+    plog(@"groupsql open-failed path=%@", db ?: @"(nil)");
+  }
+
+  NSURL *file = [dir URLByAppendingPathComponent:@"coordinated.txt"];
+  NSString *text = [NSString stringWithContentsOfURL:file encoding:NSUTF8StringEncoding error:NULL];
+  if (text) {
+    plog(@"groupcoord read=%@", text);
+  } else {
+    __block BOOL wrote = NO;
+    NSError *error = nil;
+    [[[NSFileCoordinator alloc] initWithFilePresenter:nil] coordinateWritingItemAtURL:file options:0 error:&error byAccessor:^(NSURL *url) {
+      wrote = [value writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    }];
+    plog(@"groupcoord miss add=%@ wrote=%d", value, wrote);
+  }
+
+  NSUbiquitousKeyValueStore *kvs = NSUbiquitousKeyValueStore.defaultStore;
+  NSString *kv = [kvs stringForKey:@"probe"];
+  if (kv) {
+    plog(@"kvs read=%@", kv);
+  } else {
+    [kvs setString:value forKey:@"probe"];
+    plog(@"kvs miss add=%@ sync=%d", value, [kvs synchronize]);
+  }
+}
+
+// Two methods the quirk table names for this app (AppQuirks.swift): the
+// installer's quirks shim makes the BOOL getter answer YES and must leave the
+// NSInteger getter alone.
+@interface ProbeQuirkTarget : NSObject
+- (BOOL)probeQuirkSwitch;
+- (NSInteger)probeQuirkCount;
+@end
+
+@implementation ProbeQuirkTarget
+- (BOOL)probeQuirkSwitch { return NO; }
+- (NSInteger)probeQuirkCount { return 7; }
+@end
+
+static void quirkReport(void) {
+  ProbeQuirkTarget *t = [ProbeQuirkTarget new];
+  plog(@"quirk switch=%d count=%ld", t.probeQuirkSwitch, (long)t.probeQuirkCount);
 }
 
 static void glLookup(void) {
@@ -274,8 +446,25 @@ static void glLookup(void) {
        UIDevice.currentDevice.model, sysctlString("hw.machine"), sysctlString("hw.model"),
        NSBundle.mainBundle.bundleIdentifier, probekit_hello());
   self.window = [[UIWindow alloc] initWithWindowScene:ws];
-  self.window.rootViewController = [ProbeViewController new];
+  // ProbeWindow (make-probe-ipa.sh, PROBE_WINDOW):
+  //   blank     what YouTube did under Catalyst's late first scene
+  //             (2026-11-26): its first screen was built and presented from,
+  //             but never attached to the window, which stays empty. Eider's
+  //             doctor must call this window_not_attached.
+  //   detached  the window has its content, and a controller in no window
+  //             presents anyway: the same UIKit warning, which on its own
+  //             must not be called an empty window.
+  NSString *mode = [NSBundle.mainBundle objectForInfoDictionaryKey:@"ProbeWindow"];
+  if (![mode isEqual:@"blank"]) self.window.rootViewController = [ProbeViewController new];
   [self.window makeKeyAndVisible];
+  if ([mode isEqual:@"blank"] || [mode isEqual:@"detached"]) {
+    UIViewController *detached = [ProbeViewController new];
+    [detached loadViewIfNeeded];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [detached presentViewController:[UIViewController new] animated:NO completion:nil];
+      plog(@"window=%@ presented from a detached controller", mode);
+    });
+  }
 }
 @end
 
@@ -288,9 +477,13 @@ static void glLookup(void) {
   [NSFileManager.defaultManager createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:NULL];
   logPath = [docs stringByAppendingPathComponent:@"probe.log"];
   keychainRoundTrip();
+  teamIdReport();
   sharedKeychainRoundTrip();
+  flaggedKeychainRoundTrip();
   groupDefaultsRoundTrip();
+  groupStoresRoundTrip();
   groupContainerWrite();
+  quirkReport();
   glLookup();
   return YES;
 }

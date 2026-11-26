@@ -108,8 +108,19 @@ static NSURL *own_container_url(id self, SEL _cmd, NSString *group) {
 // ~/Library/Containers/<bundle id>/Data/Library/Preferences/ipagroups.<group>.plist.
 // The rename is applied wherever the group id names a preferences domain:
 // -[NSUserDefaults initWithSuiteName:], -addSuiteNamed:, -removeSuiteNamed:,
-// and every CFPreferences function that takes an application id. Like the
-// folder, the values are private to this app.
+// the three persistent-domain methods (-persistentDomainForName:,
+// -setPersistentDomain:forName:, -removePersistentDomainForName:, which Swift
+// code calls as UserDefaults(suiteName: g)?.removePersistentDomain(forName: g)
+// to clear a group's suite at sign-out; unrenamed, the read answered nothing,
+// measured 2026-11-27 by the e2e probe, so a clear would have missed the
+// values the suite kept), and every CFPreferences function that takes an
+// application id.
+// Like the folder, the values are private to this app.
+//
+// Only the app's signed groups are renamed. A "group." suite the app is not
+// signed for (a group id read from its Info.plist, say) is an ordinary domain
+// to cfprefsd and is stored in the container already (measured the same day:
+// written, kill -9, read back after a relaunch through `open`).
 
 static NSString *const kPrefsPrefix = @"ipagroups.";
 
@@ -214,8 +225,12 @@ DYLD_INTERPOSE(groups_remove_suite, CFPreferencesRemoveSuitePreferencesFromApp)
 // NSUserDefaults calls CoreFoundation's internals, not the functions above.
 typedef id (*suite_init_fn)(id, SEL, NSString *);
 typedef void (*suite_fn)(id, SEL, NSString *);
+typedef NSDictionary *(*domain_get_fn)(id, SEL, NSString *);
+typedef void (*domain_set_fn)(id, SEL, NSDictionary *, NSString *);
 static suite_init_fn original_init_suite;
-static suite_fn original_add_suite, original_remove_suite;
+static suite_fn original_add_suite, original_remove_suite, original_remove_domain;
+static domain_get_fn original_get_domain;
+static domain_set_fn original_set_domain;
 
 static id groups_init_suite(id self, SEL _cmd, NSString *suite) {
     return original_init_suite(self, _cmd, prefs_domain(suite));
@@ -225,6 +240,15 @@ static void groups_add_suite_named(id self, SEL _cmd, NSString *suite) {
 }
 static void groups_remove_suite_named(id self, SEL _cmd, NSString *suite) {
     original_remove_suite(self, _cmd, prefs_domain(suite));
+}
+static NSDictionary *groups_persistent_domain(id self, SEL _cmd, NSString *name) {
+    return original_get_domain(self, _cmd, prefs_domain(name));
+}
+static void groups_set_persistent_domain(id self, SEL _cmd, NSDictionary *domain, NSString *name) {
+    original_set_domain(self, _cmd, domain, prefs_domain(name));
+}
+static void groups_remove_persistent_domain(id self, SEL _cmd, NSString *name) {
+    original_remove_domain(self, _cmd, prefs_domain(name));
 }
 
 static IMP swap(Class c, SEL sel, IMP replacement) {
@@ -243,7 +267,50 @@ static void redirect_group_preferences(void) {
     original_init_suite = (suite_init_fn)swap(d, @selector(initWithSuiteName:), (IMP)groups_init_suite);
     original_add_suite = (suite_fn)swap(d, @selector(addSuiteNamed:), (IMP)groups_add_suite_named);
     original_remove_suite = (suite_fn)swap(d, @selector(removeSuiteNamed:), (IMP)groups_remove_suite_named);
+    original_get_domain = (domain_get_fn)swap(d, @selector(persistentDomainForName:), (IMP)groups_persistent_domain);
+    original_set_domain = (domain_set_fn)swap(d, @selector(setPersistentDomain:forName:), (IMP)groups_set_persistent_domain);
+    original_remove_domain = (suite_fn)swap(d, @selector(removePersistentDomainForName:), (IMP)groups_remove_persistent_domain);
 }
+
+// ── Team identifier ─────────────────────────────────────────────────────────
+// Why: some apps read their team id from their own signature and use it
+// without a nil check. LiveContainer 3.8.0's +[LCSharedUtils teamIdentifier]
+// passes SecTaskCopyValueForEntitlement(self,
+// "com.apple.developer.team-identifier") to CFGetTypeID, and an ad hoc
+// signature has no team id (it cannot: a signature that claims one is
+// killed), so it crashed with EXC_BAD_ACCESS at every launch (measured
+// 2026-11-27, compatibility sweep, macOS 27.3).
+//
+// What: when macOS answers nothing for that one key, the answer is a
+// synthetic team id: the same ten characters the keychain shim puts before
+// every access group it makes up (ipa-keychain.c, access_group(): FNV-1a of
+// the bundle id in a 32-letter alphabet), so an app that derives one from the
+// other sees them agree; the e2e probe checks that they do. Every other key,
+// and a real answer for this one, pass through unchanged.
+
+static CFStringRef const kTeamIdentifier = CFSTR("com.apple.developer.team-identifier");
+static CFStringRef synthetic_team;
+
+static CFStringRef team_identifier(void) {
+    if (synthetic_team) return synthetic_team;
+    NSString *bid = NSBundle.mainBundle.bundleIdentifier ?: @"app";
+    unsigned long long h = 1469598103934665603ULL;
+    for (const char *c = bid.UTF8String; *c; c++) { h ^= (unsigned char)*c; h *= 1099511628211ULL; }
+    static const char alpha[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    char seed[11];
+    for (int i = 0; i < 10; i++) { seed[i] = alpha[h % 32]; h /= 32; }
+    seed[10] = 0;
+    synthetic_team = CFStringCreateWithCString(kCFAllocatorDefault, seed, kCFStringEncodingUTF8);
+    return synthetic_team;
+}
+
+static CFTypeRef groups_copy_entitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error) {
+    CFTypeRef value = SecTaskCopyValueForEntitlement(task, entitlement, error);
+    if (value != NULL || entitlement == NULL || !CFEqual(entitlement, kTeamIdentifier)) return value;
+    if (error && *error) { CFRelease(*error); *error = NULL; }
+    return CFRetain(team_identifier());
+}
+DYLD_INTERPOSE(groups_copy_entitlement, SecTaskCopyValueForEntitlement)
 
 __attribute__((constructor)) static void ipagroups_install(void) {
     Method m = class_getInstanceMethod([NSFileManager class],

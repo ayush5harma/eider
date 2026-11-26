@@ -61,7 +61,12 @@ seconds (`--settle <seconds>`, which must be less than `--timeout`, default
 20). An app that dies sooner gets a diagnosis with a stable code, such as
 `launch.uncaught_exception` (an Objective-C exception, with the exception,
 its reason and the app binary that threw it), `launch.library_not_loaded` or
-`launch.system_policy`.
+`launch.system_policy`. An app that stays up with an empty window, because it
+built its first screen before macOS gave it a window, is reported as
+`launch.window_not_attached` (this needs the Accessibility permission for the
+terminal or for Eider, to read the window); such an app needs a per-app
+workaround, so please report it (see "Adding a quirk row" in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 Sources can be in the AltStore or the PlayCover format; see
 [docs/SOURCES.md](docs/SOURCES.md). Eider ships no sources.

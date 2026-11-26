@@ -53,7 +53,10 @@ public struct LaunchProbe: Sendable {
 
         let bundle = app.path
         let outcome = await watch(timeout: timeout) { RunningProcesses.pids(insideBundle: bundle) }
-        if case .settled(let pid) = outcome { return .running(pid: pid) }
+        if case .settled(let pid) = outcome {
+            if let empty = await emptyWindow(pid: pid, process: process, since: start) { return .failed(empty) }
+            return .running(pid: pid)
+        }
         let appeared = outcome != .neverAppeared
         return .failed(await diagnose(app, process: process, since: start, appeared: appeared, timeout: timeout))
     }
@@ -118,6 +121,16 @@ public struct LaunchProbe: Sendable {
         }
         guard diagnosis.code == .unknown else { return diagnosis }
         return LaunchDiagnosis(code: .unknown, summary: diagnosis.summary, evidence: [failureNote(appeared: appeared, timeout: timeout)] + diagnosis.evidence)
+    }
+
+    /// A running app whose window is empty (`LaunchClassifier.emptyWindow`).
+    /// The window is read first because it is cheap and settles almost every
+    /// launch: a window with content, or no Accessibility permission, ends the
+    /// check before the log is read (`log show` takes seconds).
+    private func emptyWindow(pid: Int32, process: String, since start: Date) async -> LaunchDiagnosis? {
+        guard WindowContent.contentElements(pid: pid, limit: 1) == 0 else { return nil }
+        let log = await LaunchEvidence.logLines(process: process, since: start)
+        return LaunchClassifier.emptyWindow(lines: log, processName: process, contentElements: 0)
     }
 
     /// Only an app that was seen and then died is said to have exited; one that

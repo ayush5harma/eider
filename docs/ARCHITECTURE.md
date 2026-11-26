@@ -42,10 +42,15 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   (CallKit) and `libipacamera` (AVFoundation). The decision is
   `ShimLinker.shimsToLink`; a dylib path read from an IPA is only compared to
   those fixed framework names, never used to build a path. `libipaquirks`
-  holds per-app workarounds for an app's own code under Catalyst and is linked
-  last, only when the IPA's own bundle id is exactly one in
-  `ShimLinker.quirkBundleIDs` (today YouTube, whose launch sequence loses the
-  race with Catalyst's late first scene and leaves a blank window).
+  applies per-app workarounds for an app's own code under Catalyst from a
+  table, `AppQuirks.all`: each row is {bundle id, class, selector, forced BOOL
+  return}. It is linked last, only when the IPA's own bundle id (not a
+  `--bundle-id` override) has a row, and the installer writes that app's rows
+  into the bundle as `EiderQuirks.plist` before signing (replacing, never
+  following, whatever the IPA shipped under that name). The shim applies a
+  row only when the class and method exist and the method is a BOOL getter
+  with no arguments. The first row is YouTube's, whose launch sequence loses
+  the race with Catalyst's late first scene and leaves a blank window.
   `libipaneutralised` is the empty stand-in for a keychain-fix tweak.
 - The app is signed with a fixed sandbox entitlement set plus one thing read
   from the IPA: `com.apple.security.application-groups`. `AppGroups.read`
@@ -59,7 +64,7 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   most 32 groups, no `..`), because the groups shim turns it into a path; others
   are dropped with an install warning. `libipagroups` still redirects the
   container, since macOS refuses an ad hoc app the real one, and stores each
-  signed group's preferences (NSUserDefaults suites and the CFPreferences
+  signed group's preferences (NSUserDefaults suites, their persistent domains and the CFPreferences
   functions) under the domain `ipagroups.<group>` in the app's own container:
   launched through LaunchServices, cfprefsd refuses every write to a domain
   named after one of the app's groups, so a sign-in kept there was lost at
@@ -151,9 +156,45 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   `LaunchClassifier` is a pure function over log and crash-report lines and
   checks `uncaught_exception` first (an exception line proves the app ran past
   dyld and code signing); it is given the Mach-O file names in the bundle so
-  the summary can name the binary whose frame threw.
+  the summary can name the binary whose frame threw. A process that stays up
+  is checked once more: if its window holds nothing but its title bar and
+  container groups (an alert sheet or a toolbar counts as content)
+  (`WindowContent`, through the Accessibility API, so only with that
+  permission) and its log shows UIKit's "whose view is not in the window
+  hierarchy", the answer is `window_not_attached`, with the app left running.
+  Either signal alone is common in apps that work (a game draws into one view
+  with no accessible content; the warning is often harmless), so both are
+  required, and the window is read first so a window with content never pays
+  for a log query.
 - No code is copied from Feather, PlayCover or PlayTools (GPL and AGPL); this
   repository is MIT.
+
+## Adding a quirk row
+
+An app that misbehaves because of its own code, and whose fix is one BOOL
+getter answering YES or NO (a server-side feature switch, typically), needs
+one row in `AppQuirks.all` (Sources/EiderKit/Engine/AppQuirks.swift), no
+shim change:
+
+1. Find the getter: the class and selector, from the app's own binary
+   (`class-dump`, or the selectors near the symptom in a crash or log line).
+   It must be an instance method returning BOOL with no arguments.
+2. Prove it by effect on a scratch install: force the getter in a debugger or
+   with a throwaway row, open the app through `open`, and compare what it
+   shows (`eider doctor`, or what its window holds through the Accessibility
+   API; System Events' "entire contents" answered 0 for every Catalyst window
+   on macOS 27.3) with and without the row.
+3. Add the row with `why`: what goes wrong without it and what was measured,
+   with the app version and the date. `AppQuirksTests` checks its shape.
+4. Reinstall the app: rows are written at install time, so an installed copy
+   picks up a new row only through a reinstall or an update.
+
+`eider doctor` reports `window_not_attached` for the most common case seen so
+far, a window left empty by a launch sequence that ran before Catalyst's late
+first scene; that diagnosis asks the user to report the app so a row can be
+added. There is no generic remedy: which controller belongs in the window is
+the app's own private state, and attaching a guessed one could break an app
+that works, so none is offered even behind an option.
 
 ## Reference implementation
 

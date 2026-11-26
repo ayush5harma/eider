@@ -25,6 +25,32 @@ final class DiagnosticsClassifierTests: XCTestCase {
         XCTAssertEqual(diagnosis.code, .unknown)
     }
 
+    /// Measured 2026-11-27 (compatibility sweep, macOS 27.3): LiveContainer
+    /// 3.8.0 crashed at launch, and the doctor called it a sandbox denial from
+    /// ReportCrashService's own reports, which name the app's path and say
+    /// "allow". Only a refusal of the app's own process counts.
+    func testAnotherProcessReadingTheAppsFilesIsNotTheAppsDenial() {
+        let lines = [
+            "2026-11-27 00:27:23.817 Df kernel[0:a156e] [com.apple.sandbox.reporting:violation] Sandbox: ReportCrashService(89544) allow file-read-data /private/tmp/eider-sweep/apps/LiveContainer.app",
+            "2026-11-27 00:27:23.817 Df kernel[0:a156e] [com.apple.sandbox.reporting:violation] 1 duplicate report for Sandbox: ReportCrashService(89544) allow file-read-data /private/tmp/eider-sweep/apps/LiveContainer.app",
+            "2026-11-27 00:25:19.465 E  kernel[0:9d3fb] [com.apple.sandbox.reporting:violation] Sandbox: dasd(595) deny(1) file-read-data /private/tmp/eider-sweep/apps/LiveContainer.app/LiveContainer",
+            "2026-11-27 00:24:33.900 Df kernel[0:1] (Sandbox) System Policy: mds(12) deny(1) file-read-data /private/tmp/eider-sweep/apps/LiveContainer.app",
+        ]
+        XCTAssertEqual(classify(lines, process: "LiveContainer").code, .unknown)
+    }
+
+    func testAnAllowedOperationIsNotADenial() {
+        XCTAssertEqual(classify(["kernel: Sandbox: Probe(4242) allow file-read-data /x"]).code, .unknown)
+    }
+
+    /// A process name that is the tail of another's ("Container" in
+    /// "LiveContainer") is not that process.
+    func testADenialOfAProcessWithALongerNameIsNotThisOnes() {
+        let line = "kernel: Sandbox: LiveContainer(1) deny(1) mach-lookup x"
+        XCTAssertEqual(classify([line], process: "Container").code, .unknown)
+        XCTAssertEqual(classify([line], process: "LiveContainer").code, .sandboxDenial)
+    }
+
     func testKeychainMissingEntitlement() {
         let diagnosis = classify(["Probe[4242:1] SecItemAdd failed: -34018 A required entitlement isn't present."])
         XCTAssertEqual(diagnosis.code, .keychainEntitlement)
