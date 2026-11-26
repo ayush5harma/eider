@@ -161,6 +161,8 @@ check "keychain shim linked" links libipakeychain.dylib
 check "CallKit shim linked (the probe links CallKit)" links libipacallkit.dylib
 check "camera shim linked (the probe links AVFoundation)" links libipacamera.dylib
 check "app-group shim linked" links libipagroups.dylib
+check "quirks shim linked (the probe has rows in the quirk table)" links libipaquirks.dylib
+check "the probe's quirk rows are written into the bundle" grep -qF probeQuirkSwitch "$APP/EiderQuirks.plist"
 check "embedded.mobileprovision removed" test ! -e "$APP/embedded.mobileprovision"
 check "bundle signature verifies" codesign --verify --strict "$APP"
 check "no quarantine attribute left" no_quarantine
@@ -169,6 +171,7 @@ if launch; then
   check "shipped idiom (iPad, 1)" logged ' launch idiom=1 '
   check "embedded framework loaded" logged 'probekit ok'
   check "GL lookup answers OpenGL ES, not desktop libGL" logged 'gl lookup=OpenGLES '
+  check "a quirk row forced the BOOL getter and left the NSInteger getter alone" logged 'quirk switch=1 count=7$'
   check "keychain item stored (shim)" logged 'keychain miss=.* add=0 '
   check "app-group folder is in the container and writable" \
     logged 'group write=1 path=.*/Library/Containers/[^/]+/Data/Library/Group Containers/group\.ipa\.probe\.shared '

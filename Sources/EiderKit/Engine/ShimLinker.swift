@@ -33,8 +33,8 @@ struct ShimLinker {
         return wanted
     }
 
-    /// The apps Shims/ipa-quirks.m has a workaround for; keep the two in step.
-    static let quirkBundleIDs: Set<String> = ["com.google.ios.youtube"]
+    /// The apps with a row in the quirk table (`AppQuirks.all`).
+    static let quirkBundleIDs = Set(AppQuirks.all.map(\.bundleID))
 
     /// Install `source` as `Frameworks/<name>` and link it. Returns the copy,
     /// which the signing step must cover.

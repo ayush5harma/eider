@@ -27,6 +27,8 @@
 //            NSUbiquitousKeyValueStore (see groupStoresRoundTrip)
 //   group    an app group's folder and whether a file could be written in it
 //            (the installer's app-group shim puts it inside the container)
+//   quirk    whether the installer's quirk table reached this app: a BOOL
+//            getter it forces to YES, and an NSInteger getter it must not touch
 //   gl       which image dlsym(RTLD_DEFAULT, "glCreateShader") resolves to
 //            (the probe links OpenGL ES, so the installer adds its redirect)
 //
@@ -275,6 +277,24 @@ static void groupStoresRoundTrip(void) {
   }
 }
 
+// Two methods the quirk table names for this app (AppQuirks.swift): the
+// installer's quirks shim makes the BOOL getter answer YES and must leave the
+// NSInteger getter alone.
+@interface ProbeQuirkTarget : NSObject
+- (BOOL)probeQuirkSwitch;
+- (NSInteger)probeQuirkCount;
+@end
+
+@implementation ProbeQuirkTarget
+- (BOOL)probeQuirkSwitch { return NO; }
+- (NSInteger)probeQuirkCount { return 7; }
+@end
+
+static void quirkReport(void) {
+  ProbeQuirkTarget *t = [ProbeQuirkTarget new];
+  plog(@"quirk switch=%d count=%ld", t.probeQuirkSwitch, (long)t.probeQuirkCount);
+}
+
 static void glLookup(void) {
   Dl_info info = {0};
   void *p = dlsym(RTLD_DEFAULT, "glCreateShader");
@@ -416,6 +436,7 @@ static void glLookup(void) {
   groupDefaultsRoundTrip();
   groupStoresRoundTrip();
   groupContainerWrite();
+  quirkReport();
   glLookup();
   return YES;
 }
