@@ -90,19 +90,23 @@ public struct AppOperations: Sendable {
     // MARK: Update
 
     /// Reinstalls the newest catalog version of an installed app, with the
-    /// options it was installed with. The app's data is kept (a reset is never
-    /// repeated). Returns nil when no source offers anything newer.
+    /// options it was installed with, from the source and entry the matcher
+    /// picked (`UpdateChecker`: its origin first). The app's data is kept (a
+    /// reset is never repeated), and the IPA must land on the same installed
+    /// app: one that now ships another id stops before anything is placed.
+    /// Returns nil when no source offers anything newer.
     public func update(
         bundleID: String, onEvent: @escaping @Sendable (OperationEvent) -> Void = { _ in }
     ) async throws -> InstalledApp? {
         do {
             guard let installed = try await library.app(bundleID: bundleID) else { throw OperationFailure.notInstalled(bundleID) }
             let catalog = try await sources.allApps()
-            guard catalog.contains(where: { $0.app.bundleID == bundleID }) else { throw OperationFailure.notInCatalog(bundleID) }
+            guard UpdateChecker.isListed(installed, in: catalog) else { throw OperationFailure.notInCatalog(bundleID) }
             guard let update = UpdateChecker.update(for: installed, in: catalog) else { return nil }
             var options = installed.options
             options.resetData = false
             options.force = false
+            options.replacingBundleID = installed.bundleID
             return try await install(app: update.app, version: update.version, sourceURL: update.sourceURL, options: options, expectsCatalogID: true, onEvent: onEvent)
         } catch is CancellationError {
             throw CancellationError()
@@ -162,6 +166,8 @@ public struct AppOperations: Sendable {
             // IPA's validated id, never used: an entry whose id matches no IPA's id installs only
             // under the owner's own --bundle-id. It never becomes `options.bundleID`.
             options.expectedBundleID = expectsCatalogID ? app.bundleID : nil
+            // Provenance for the update matcher: the listed id is kept as data next to the source.
+            options.origin = expectsCatalogID ? InstallOrigin(sourceURL: sourceURL, entryID: app.bundleID) : nil
             var mapper = DownloadEventMapper(label: "\(app.name) \(release.version)")
             var file: URL?
             for try await event in downloads.download(release, of: app) {

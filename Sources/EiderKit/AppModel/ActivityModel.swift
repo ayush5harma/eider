@@ -4,6 +4,8 @@ import Observation
 /// One row of the Activity list.
 public struct ActivityItem: Identifiable, Equatable, Sendable {
     public enum State: Equatable, Sendable {
+        /// Waiting for the one before it in an Update All run.
+        case queued
         case running
         case succeeded
         /// An update was asked for and nothing newer exists.
@@ -24,6 +26,8 @@ public struct ActivityItem: Identifiable, Equatable, Sendable {
 
     public var title: String { request.title }
     public var isRunning: Bool { state == .running }
+    /// Running, or queued to run: not finished.
+    public var isPending: Bool { state == .running || state == .queued }
     public var isFailed: Bool { if case .failed = state { return true } else { return false } }
     public var canRetry: Bool { isFailed || state == .cancelled }
 
@@ -41,6 +45,7 @@ public struct ActivityItem: Identifiable, Equatable, Sendable {
 public final class ActivityModel {
     public private(set) var items: [ActivityItem] = []
     public var hasRunning: Bool { items.contains(where: \.isRunning) }
+    public var pendingCount: Int { items.lazy.filter(\.isPending).count }
 
     @ObservationIgnored private let backend: AppBackend
     @ObservationIgnored private let onFinished: @MainActor (ActivityItem) -> Void
@@ -59,7 +64,35 @@ public final class ActivityModel {
         return item.id
     }
 
+    /// Adds every request at once, as queued rows, and runs them one after
+    /// another: Update All downloads one IPA at a time, as the App Store does,
+    /// rather than racing every download and every signing pass.
+    @discardableResult
+    public func startInSequence(_ requests: [InstallRequest]) -> [UUID] {
+        let queued = requests.map { request in
+            var item = ActivityItem(request: request, options: InstallOptions())
+            item.state = .queued
+            item.message = "Waiting"
+            return item
+        }
+        items.insert(contentsOf: queued, at: 0)
+        let ids = queued.map(\.id)
+        Task { @MainActor [weak self] in
+            for id in ids {
+                guard let self, self.item(id)?.state == .queued else { continue }
+                self.update(id) { $0.state = .running; $0.message = "Starting" }
+                self.run(id)
+                await self.tasks[id]?.value
+            }
+        }
+        return ids
+    }
+
     public func cancel(_ id: UUID) {
+        if item(id)?.state == .queued {
+            update(id) { $0.state = .cancelled; $0.message = "Cancelled" }
+            return
+        }
         tasks[id]?.cancel()
     }
 
@@ -70,7 +103,7 @@ public final class ActivityModel {
     }
 
     public func clearFinished() {
-        items.removeAll { !$0.isRunning }
+        items.removeAll { !$0.isPending }
     }
 
     /// Resolves once the operation has finished; the tests wait on this.

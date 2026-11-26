@@ -70,6 +70,36 @@ extension AppModel {
         await reload()
     }
 
+    /// How old a source's saved copy may get before the launch check fetches it again.
+    public static let staleSourceAge: TimeInterval = 6 * 3600
+
+    /// At launch: fetch, in the background, only the sources whose copy is
+    /// older than `staleSourceAge`, then work out the updates again. The window
+    /// is usable throughout (the fetch and the parse run off the main actor),
+    /// and a failed fetch keeps the old copy and is shown on the Sources page.
+    public func refreshStaleSources(now: Date = Date()) async {
+        let stale = sources.filter { now.timeIntervalSince($0.fetchedAt) > Self.staleSourceAge }.map(\.url)
+        guard !stale.isEmpty, !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let outcomes = try await backend.refreshSources(stale)
+            var failures = refreshFailures
+            for outcome in outcomes {
+                switch outcome.result {
+                case .success: failures[outcome.url] = nil
+                case .failure(let error):
+                    let failure = OperationFailure.wrap(error)
+                    failures[outcome.url] = "\(failure.message) (\(failure.code))"
+                }
+            }
+            refreshFailures = failures
+        } catch {
+            report(error)
+        }
+        await reload()
+    }
+
     /// A web address, or a local path (a source kept in a file).
     static func sourceURL(from text: String) -> URL? {
         guard !text.isEmpty else { return nil }

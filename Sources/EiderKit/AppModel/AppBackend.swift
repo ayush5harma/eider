@@ -34,6 +34,8 @@ public protocol AppBackend: Sendable {
     func addSource(_ url: URL) async throws -> CatalogSource
     func removeSource(_ url: URL) async throws
     func refreshAllSources() async throws -> [SourceRefreshResult]
+    /// Refreshes only these sources (the launch check's stale ones).
+    func refreshSources(_ urls: [URL]) async throws -> [SourceRefreshResult]
     /// Nil when an update was asked for and nothing newer exists.
     func perform(
         _ request: InstallRequest, options: InstallOptions,
@@ -41,6 +43,13 @@ public protocol AppBackend: Sendable {
     ) async throws -> InstalledApp?
     func uninstall(bundleID: String, removeData: Bool) async throws
     func diagnose(_ app: InstalledApp) async -> LaunchResult
+}
+
+extension AppBackend {
+    /// For a backend that can only refresh everything.
+    public func refreshSources(_ urls: [URL]) async throws -> [SourceRefreshResult] {
+        try await refreshAllSources().filter { urls.contains($0.url) }
+    }
 }
 
 /// The real thing: `AppOperations` and `LaunchProbe`.
@@ -83,6 +92,10 @@ public struct LiveBackend: AppBackend {
 
     public func refreshAllSources() async throws -> [SourceRefreshResult] {
         try await wrapped { try await operations.sources.refreshAll() }
+    }
+
+    public func refreshSources(_ urls: [URL]) async throws -> [SourceRefreshResult] {
+        try await wrapped { try await operations.sources.refresh(urls: urls) }
     }
 
     public func perform(

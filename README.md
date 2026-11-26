@@ -66,18 +66,27 @@ Sources can be in the AltStore or the PlayCover format; see
 
 ## The app
 
-`Eider.app` has four places: Library (what you installed, with updates),
-Browse (the apps your sources offer), Activity (downloads and installs in
-progress) and Sources (add, refresh and remove them). Dropping an `.ipa` on
+`Eider.app` is laid out like the Mac App Store and has five places: Library
+(a grid of what you installed), Updates (every installed app a source has a
+newer version of, with its release notes, Update and Update All; the count
+shows on the sidebar and the Dock icon), Browse (the apps your sources offer,
+each with a product page: screenshots, What's New, information and version
+history), Activity (downloads and installs, one ring each) and Sources (add,
+refresh and remove them). Updates are matched to the entry an app was
+installed from, even when the source lists it under another id than the app
+has, and sources older than six hours are fetched again in the background
+when the app opens. Dropping an `.ipa` on
 the window installs it. An `eider://source/<url>` or `eider://install/<url>`
 link always asks before it does anything. The app and the CLI share one
 engine, `EiderKit`, so they behave the same.
 
-The Library and Browse sections, drawn by the app's own `--snapshot` mode against a test source:
+The Library, Updates and Browse sections, drawn by the app's own `--snapshot` mode against a test source:
 
 ![Library: an installed app with an update available](docs/images/library.png)
 
-![Browse: a source's apps and the detail pane](docs/images/browse.png)
+![Updates: the installed app's newer version, with its source, date and size](docs/images/updates.png)
+
+![Browse: a source's apps and an app's product page](docs/images/browse.png)
 
 ## How an install works
 

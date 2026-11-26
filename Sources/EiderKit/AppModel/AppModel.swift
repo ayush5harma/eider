@@ -17,6 +17,14 @@ public final class AppModel {
 
     public internal(set) var installed: [InstalledApp] = []
     public internal(set) var updates: [String: AvailableUpdate] = [:]
+    /// The same updates in library order, for the Updates list.
+    public internal(set) var updateList: [AvailableUpdate] = []
+    /// Apps installed or updated in the last 30 days, newest first, without
+    /// those that have an update waiting: the Updates page's lower section.
+    public internal(set) var recentInstalls: [InstalledApp] = []
+    /// When the sources' saved copies were last fetched (the newest of them):
+    /// what the update list is as fresh as. Nil with no sources.
+    public internal(set) var lastUpdateCheck: Date?
     public internal(set) var sources: [CatalogSource] = []
     public internal(set) var catalog: [SourcedApp] = []
 
@@ -38,6 +46,7 @@ public final class AppModel {
     @ObservationIgnored var indexGeneration = 0
     @ObservationIgnored var filterTask: Task<Void, Never>?
     @ObservationIgnored var filterGeneration = 0
+    @ObservationIgnored var reloadGeneration = 0
 
     // Sources
     public var newSourceText = ""
@@ -79,21 +88,45 @@ public final class AppModel {
     // MARK: Loading
 
     /// Reads the library and the saved copies of the sources from disk. Never
-    /// touches the network: that is `refreshAllSources()`, on the person's action.
+    /// touches the network: that is `refreshAllSources()`, on the person's
+    /// action, and `refreshStaleSources()` at launch. The update list is
+    /// worked out off the main actor from what was just read, and only the
+    /// newest reload publishes, so a slow one never overwrites a later one.
     public func reload() async {
+        reloadGeneration += 1
+        let generation = reloadGeneration
         do {
             let loadedInstalled = try await backend.installedApps()
             installed = loadedInstalled
             installedByBundleID = Dictionary(
                 loadedInstalled.map { ($0.bundleID, $0) }, uniquingKeysWith: { first, _ in first })
             sources = try await backend.sources()
-            setCatalog(try await backend.catalog())
-            let available = try await backend.availableUpdates()
-            updates = Dictionary(available.map { ($0.installed.bundleID, $0) }, uniquingKeysWith: { first, _ in first })
+            lastUpdateCheck = sources.map(\.fetchedAt).max()
+            let loadedCatalog = try await backend.catalog()
+            setCatalog(loadedCatalog)
+            let found = await Task.detached(priority: .userInitiated) {
+                UpdateChecker.updates(installed: loadedInstalled, catalog: loadedCatalog)
+            }.value
+            guard generation == reloadGeneration else { return }
+            publishUpdates(found, installed: loadedInstalled)
         } catch {
             report(error)
         }
     }
+
+    private func publishUpdates(_ found: [AvailableUpdate], installed: [InstalledApp], now: Date = Date()) {
+        let byID = Dictionary(found.map { ($0.installed.bundleID, $0) }, uniquingKeysWith: { first, _ in first })
+        if byID != updates { updates = byID }
+        if found != updateList { updateList = found }
+        let recent = Array(installed
+            .filter { byID[$0.bundleID] == nil && now.timeIntervalSince($0.installedAt) < Self.recentInstallWindow }
+            .sorted { $0.installedAt > $1.installedAt }
+            .prefix(Self.recentInstallLimit))
+        if recent != recentInstalls { recentInstalls = recent }
+    }
+
+    static let recentInstallWindow: TimeInterval = 30 * 24 * 3600
+    static let recentInstallLimit = 12
 
     func report(_ error: Error) {
         guard !(error is CancellationError) else { return }
