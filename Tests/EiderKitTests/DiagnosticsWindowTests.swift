@@ -12,36 +12,37 @@ final class DiagnosticsWindowTests: XCTestCase {
         XCTAssertEqual(LaunchDiagnosis.Code.windowNotAttached.rawValue, "window_not_attached")
     }
 
-    func testMarkerAndAnEmptyWindowIsDiagnosed() throws {
-        let diagnosis = try XCTUnwrap(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "YouTube", contentElements: 8))
+    func testMarkerAndAWindowWithNoContentIsDiagnosed() throws {
+        let diagnosis = try XCTUnwrap(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "YouTube", contentElements: 0))
         XCTAssertEqual(diagnosis.code, .windowNotAttached)
         XCTAssertTrue(diagnosis.summary.contains("still running"), diagnosis.summary)
         XCTAssertTrue(diagnosis.summary.contains("report"), diagnosis.summary)
         XCTAssertEqual(diagnosis.evidence.first, youTubeLine)
-        XCTAssertTrue(diagnosis.evidence.contains { $0.contains("8 accessibility elements") }, "\(diagnosis.evidence)")
+        XCTAssertTrue(diagnosis.evidence.contains { $0.contains("no content") }, "\(diagnosis.evidence)")
     }
 
-    /// YouTube with its window attached showed 79 elements; an app with real
+    /// One text field is content (the e2e probe's whole window); an app with
     /// content that logs the same benign warning is not called empty.
     func testAWindowWithContentIsNotDiagnosedEvenWithTheMarker() {
-        XCTAssertNil(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "YouTube", contentElements: 79))
-        XCTAssertNil(LaunchClassifier.emptyWindow(
-            lines: [youTubeLine], processName: "YouTube", contentElements: LaunchClassifier.emptyWindowMaxElements + 1))
+        for count in [1, 7, 79] {
+            XCTAssertNil(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "YouTube", contentElements: count), "\(count)")
+        }
     }
 
-    /// A game drawing into one Metal view has few elements and no marker.
-    func testAFewElementsWithoutTheMarkerIsNotDiagnosed() {
+    /// A game drawing into one Metal view exposes no content either, and is
+    /// told apart only by not logging the marker.
+    func testNoContentWithoutTheMarkerIsNotDiagnosed() {
         let lines = ["2026-11-27 10:00:00.000 Df PPSSPP[1:2] [com.apple.UIKit:Scene] scene connected"]
-        XCTAssertNil(LaunchClassifier.emptyWindow(lines: lines, processName: "PPSSPP", contentElements: 3))
+        XCTAssertNil(LaunchClassifier.emptyWindow(lines: lines, processName: "PPSSPP", contentElements: 0))
     }
 
-    /// Without Accessibility permission the content cannot be counted, and a
-    /// log line alone is too common to call a window empty.
-    func testAnUnknownElementCountIsNotDiagnosed() {
+    /// Without Accessibility permission the content cannot be read, and a log
+    /// line alone is too common to call a window empty.
+    func testUnreadableContentIsNotDiagnosed() {
         XCTAssertNil(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "YouTube", contentElements: nil))
     }
 
     func testAnotherProcessesMarkerDoesNotCount() {
-        XCTAssertNil(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "Delta", contentElements: 2))
+        XCTAssertNil(LaunchClassifier.emptyWindow(lines: [youTubeLine], processName: "Delta", contentElements: 0))
     }
 }

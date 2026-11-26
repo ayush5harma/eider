@@ -417,22 +417,25 @@ static void glLookup(void) {
        UIDevice.currentDevice.model, sysctlString("hw.machine"), sysctlString("hw.model"),
        NSBundle.mainBundle.bundleIdentifier, probekit_hello());
   self.window = [[UIWindow alloc] initWithWindowScene:ws];
-  if ([[NSBundle.mainBundle objectForInfoDictionaryKey:@"ProbeBlankWindow"] boolValue]) {
-    // What YouTube did under Catalyst's late first scene (2026-11-26): its
-    // first screen was built and presented from, but never attached to the
-    // window, which stays empty. Eider's doctor must call this
-    // window_not_attached.
-    [self.window makeKeyAndVisible];
+  // ProbeWindow (make-probe-ipa.sh, PROBE_WINDOW):
+  //   blank     what YouTube did under Catalyst's late first scene
+  //             (2026-11-26): its first screen was built and presented from,
+  //             but never attached to the window, which stays empty. Eider's
+  //             doctor must call this window_not_attached.
+  //   detached  the window has its content, and a controller in no window
+  //             presents anyway: the same UIKit warning, which on its own
+  //             must not be called an empty window.
+  NSString *mode = [NSBundle.mainBundle objectForInfoDictionaryKey:@"ProbeWindow"];
+  if (![mode isEqual:@"blank"]) self.window.rootViewController = [ProbeViewController new];
+  [self.window makeKeyAndVisible];
+  if ([mode isEqual:@"blank"] || [mode isEqual:@"detached"]) {
     UIViewController *detached = [ProbeViewController new];
     [detached loadViewIfNeeded];
     dispatch_async(dispatch_get_main_queue(), ^{
       [detached presentViewController:[UIViewController new] animated:NO completion:nil];
-      plog(@"blank-window presented from a detached controller");
+      plog(@"window=%@ presented from a detached controller", mode);
     });
-    return;
   }
-  self.window.rootViewController = [ProbeViewController new];
-  [self.window makeKeyAndVisible];
 }
 @end
 

@@ -97,7 +97,10 @@ echo "Building eider, the shims and the probe ..."
 BIN="$(cd "$ROOT" && swift build --show-bin-path)/eider"
 "$ROOT/Scripts/build-shims.sh" >"$W/shims.log" 2>&1 || { cat "$W/shims.log"; echo "build-shims failed"; exit 2; }
 PROBE_APP_GROUP="$GROUP" "$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe.ipa" >/dev/null || { echo "could not build the probe (needs Xcode's iOS SDK)"; exit 2; }
-PROBE_APP_GROUP="$GROUP" PROBE_BLANK_WINDOW=1 "$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe-blank.ipa" >/dev/null || { echo "could not build the blank-window probe"; exit 2; }
+for mode in blank detached; do
+  PROBE_APP_GROUP="$GROUP" PROBE_WINDOW=$mode "$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe-$mode.ipa" >/dev/null \
+    || { echo "could not build the $mode-window probe"; exit 2; }
+done
 xcrun clang -target arm64-apple-ios14.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -dynamiclib \
   -install_name @rpath/extra.dylib -o "$W/extra.dylib" "$ROOT/legacy/test/extra.c" || { echo "could not build the extra dylib"; exit 2; }
 unzip -q -o "$W/probe.ipa" 'Payload/Probe.app/Probe' -d "$W/x"
@@ -219,20 +222,26 @@ else
 fi
 
 # ── an empty window (replaces the copy again) ───────────────────────────────
-# The probe built to leave its window empty the way YouTube did; the doctor
-# counts the window's accessibility elements, which needs the Accessibility
-# permission for the terminal this runs in, so without it the check is skipped.
-echo "empty window: doctor reports window_not_attached"
-quit_probe
-eider install "$W/probe-blank.ipa" --dest "$W/apps" --json >"$W/out" 2>"$W/err" || bad "install the blank-window probe: $(cat "$W/err")"
-eider doctor "$BID" --json >"$W/doctor" 2>&1
+# The probe built to leave its window empty the way YouTube did, and one with
+# content that logs the same UIKit warning. The doctor reads the window
+# through the Accessibility API, which needs the Accessibility permission for
+# the terminal this runs in; without it the empty case is skipped.
+echo "empty window: doctor reports window_not_attached, and only for an empty window"
+doctor_probe() {   # $1 = blank | detached; the doctor's JSON lands in $W/doctor
+  quit_probe
+  eider install "$W/probe-$1.ipa" --dest "$W/apps" --json >"$W/out" 2>"$W/err" || bad "install the $1-window probe: $(cat "$W/err")"
+  eider doctor "$BID" --json >"$W/doctor" 2>&1
+}
+doctor_probe blank
 if grep -qF '"window_not_attached"' "$W/doctor"; then
   ok "doctor reports window_not_attached for an app whose window stayed empty"
 elif grep -qF '"running":true' "$W/doctor"; then
-  skip "doctor saw the app running but could not judge its window (Accessibility permission for this terminal?)"
+  skip "doctor saw the app running but could not read its window (Accessibility permission for this terminal?)"
 else
   bad "doctor on the blank-window probe: $(tail -n 2 "$W/doctor")"
 fi
+doctor_probe detached
+check "doctor calls an app with content running even when it logs the same warning" grep -qF '"running":true' "$W/doctor"
 
 # ── uninstall ───────────────────────────────────────────────────────────────
 echo "uninstall"
