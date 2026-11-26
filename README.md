@@ -45,11 +45,13 @@ eider update --all                                 # or: eider update <bundle-id
 eider open com.example.app                         # launch and confirm it stays up
 eider doctor com.example.app                       # launch; if it dies, say why
 eider doctor com.example.app --settle 15           # an app that fails late
+eider scale com.example.app 115                    # interface size; no reinstall
+eider scale --all auto                             # every installed app on Auto
 eider uninstall com.example.app --remove-data      # to the Trash
 ```
 
 Useful `install` options: `--dest <folder>` (default `/Applications`),
-`--mac-idiom`, `--no-keychain`, `--dylib <file>`, `--name`, `--bundle-id`,
+`--interface-size <auto|77|85|100|115|mac>` (default `auto`), `--mac-idiom`, `--no-keychain`, `--dylib <file>`, `--name`, `--bundle-id`,
 `--remove-extensions`, `--reset` (clear saved data first; the app must be
 quit) and `--force`. The argument is treated as a file only when it contains
 a slash or ends in `.ipa`; otherwise it is a bundle id.
@@ -102,6 +104,26 @@ The Library, Updates and Browse sections, drawn by the app's own `--snapshot` mo
    strictly.
 8. Stage the app on the destination volume, move any earlier copy to the
    Trash, move the new one in, and record it in `library.json`.
+9. Write the interface size into the app's own preferences (below).
+
+### Interface size
+
+An iPad app under Mac Catalyst draws at 77% ("Scale Interface to Match
+iPad"), so its 44 pt controls and 11 pt labels come out at 34 pt and 8.5 pt,
+smaller than Apple's own apps. UIKit reads two keys from the app's own
+preferences at launch: `iOSMacScaleFactor` (a number that replaces the 77%)
+and `UIUserInterfaceIdiomMac` (the Mac idiom, 1:1, without touching
+`UIDeviceFamily`). Eider writes them into the app's container, so a change
+takes a relaunch, not a reinstall, and an update keeps it. The values are
+Auto, 77% (UIKit's default), 85%, 100%, 115% and Mac idiom; new installs get
+Auto. Auto is 100% on the built-in display: UIKit points then map 1:1 to Mac
+points, as Apple's own apps draw, and macOS already sizes those from the
+resolution chosen in Displays settings. On an external display, which sits
+further away, Auto scales so a point covers the same visual angle as on a
+MacBook's built-in display at its default resolution (127 pt/in at 50 cm
+against about 65 cm), within 100-125%: 110% on a 27-inch display at "looks
+like 2560 x 1440". Eider works Auto out for the main display when it is applied
+and again each time Eider opens.
 
 No Xcode or Command Line Tools are needed to install: the install path runs
 only `codesign`, `unzip` and `lsregister`. The `legacy/` folder holds the

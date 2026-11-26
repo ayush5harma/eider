@@ -64,6 +64,20 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   launched through LaunchServices, cfprefsd refuses every write to a domain
   named after one of the app's groups, so a sign-in kept there was lost at
   each relaunch.
+- Interface size (`InterfaceScale`, `AppPreferences`) is two keys UIKitCore
+  reads from the app's own preferences at launch (`updateGlobalUserInterfaceIdiom`,
+  macOS 27.3): `iOSMacScaleFactor` replaces Catalyst's 77% iPad scale and
+  `UIUserInterfaceIdiomMac` runs the Mac idiom. They are written through
+  cfprefsd into `<Containers>/<id>/Data/Library/Preferences/<id>` after
+  placement and by `AppOperations.setInterfaceScale` (`eider scale`), never into
+  the bundle, so the signature is untouched and a change needs only a relaunch.
+  The choice is `InstallOptions.interfaceScale` (absent, nil, for entries written
+  before it: the preferences are then left alone), so updates keep it; new
+  installs default to Auto at the CLI and in the install sheet. Auto is resolved
+  from the main display by a pure function (`InterfaceScale.autoFactor`) when
+  applied and again at each launch of Eider.app
+  (`refreshAutoInterfaceScales`). Writing before the app's first launch is safe:
+  containermanagerd adopts the existing `Data` folder.
 - Nothing from an IPA or a source is trusted: https only (http for loopback
   only for a source added by a loopback address and its items, never from a
   remote source, a redirect from https or an `eider://` link; plus file URLs
@@ -74,7 +88,7 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
 - A bundle id is validated by `BundleIdentifier.isValid` wherever it becomes
   a path or a signing input, or names an installed app: an IPA's
   `CFBundleIdentifier`, `--bundle-id`, library.json, and every command whose
-  id becomes a path (`uninstall`, `open`, `doctor`, `update`). A source's own
+  id becomes a path (`uninstall`, `open`, `doctor`, `update`, `scale`). A source's own
   id (`CatalogIdentifier`) is a label for showing and matching only, as other
   clients treat it: it is cleaned by `DisplayText` and capped at 255 bytes,
   never strictly checked, so it must never be used as one. It is only compared
