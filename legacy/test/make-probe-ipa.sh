@@ -5,6 +5,11 @@
 # signing is exercised as well as the main binary's. Needs Xcode's iOS SDK.
 #
 # Usage: test/make-probe-ipa.sh [OUT.ipa]    (default: $TMPDIR/ipa-probe.ipa)
+#
+# PROBE_APP_GROUP names the app group the probe is signed with (default
+# group.local.ipa-install-on-mac.probe). macOS keeps a group's container after
+# the app is gone, so a test that needs a group's first launch passes a fresh
+# one; the probe reads it back from its Info.plist (ProbeAppGroup).
 
 set -euo pipefail
 
@@ -14,6 +19,9 @@ case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
 SDK=$(xcrun --sdk iphoneos --show-sdk-path) || { echo "no iOS SDK: install Xcode" >&2; exit 2; }
 SDKVER=$(xcrun --sdk iphoneos --show-sdk-version)
 TARGET=arm64-apple-ios15.0
+GROUP="${PROBE_APP_GROUP:-group.local.ipa-install-on-mac.probe}"
+case "$GROUP" in group.*) ;; *) echo "PROBE_APP_GROUP must start with group." >&2; exit 2 ;; esac
+case "$GROUP" in *[!A-Za-z0-9._-]*) echo "PROBE_APP_GROUP: letters, digits, '.', '-', '_' only" >&2; exit 2 ;; esac
 
 W=$(mktemp -d "${TMPDIR:-/tmp}/ipa-probe.XXXXXX")
 trap 'rm -rf "$W"' EXIT
@@ -59,6 +67,7 @@ plutil -insert UILaunchScreen -json '{}' "$P"
 # Scene lifecycle, which an app linked against the iOS 27 SDK must adopt.
 plutil -insert UIApplicationSceneManifest -json '{"UIApplicationSupportsMultipleScenes":false}' "$P"
 plutil -insert UIRequiresFullScreen -bool true "$P"
+plutil -insert ProbeAppGroup -string "$GROUP" "$P"
 # Landscape, like the games keymapping is for.
 plutil -insert UISupportedInterfaceOrientations -json \
   '["UIInterfaceOrientationLandscapeLeft","UIInterfaceOrientationLandscapeRight"]' "$P"
@@ -68,11 +77,11 @@ printf 'not a real profile\n' > "$APP/embedded.mobileprovision"
 codesign --force --sign - "$APP/Frameworks/ProbeKit.framework" >/dev/null 2>&1
 # Signed with the app group a store build would carry, so the installer's
 # carrying of application-groups into the new signature can be asserted.
-cat > "$W/entitlements.plist" <<'PLIST'
+cat > "$W/entitlements.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
   <key>application-identifier</key><string>TEAM123456.local.ipa-install-on-mac.probe</string>
-  <key>com.apple.security.application-groups</key><array><string>group.local.ipa-install-on-mac.probe</string></array>
+  <key>com.apple.security.application-groups</key><array><string>$GROUP</string></array>
 </dict></plist>
 PLIST
 codesign --force --sign - --entitlements "$W/entitlements.plist" "$APP" >/dev/null 2>&1

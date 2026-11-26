@@ -10,6 +10,9 @@ public enum Shim: String, CaseIterable, Sendable {
     case callKit = "libipacallkit.dylib"
     /// Keeps camera frame-rate requests inside what the active format supports.
     case camera = "libipacamera.dylib"
+    /// Per-app workarounds for an app's own code that misbehaves under Mac
+    /// Catalyst (Shims/ipa-quirks.m); linked only into the apps it names.
+    case quirks = "libipaquirks.dylib"
     /// Empty library that stands in for a keychain-fix tweak.
     case neutralised = "libipaneutralised.dylib"
 

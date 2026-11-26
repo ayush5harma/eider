@@ -31,10 +31,12 @@ build() {
 
 build libipakeychain.dylib ipa-keychain.c -O2 -framework CoreFoundation -framework Security
 build libipagles.dylib ipa-gles.c -O2
-build libipagroups.dylib ipa-groups.m -O2 -fobjc-arc -framework Foundation
+build libipagroups.dylib ipa-groups.m -O2 -fobjc-arc -framework Foundation -framework Security
 # Calls: linked only into apps that link CallKit / AVFoundation (ShimLinker).
 build libipacallkit.dylib ipa-callkit.m -O2 -fobjc-arc -framework Foundation
 build libipacamera.dylib ipa-camera.m -O2 -fobjc-arc -framework Foundation -framework AVFoundation -framework CoreMedia
+# Per-app workarounds: linked only into the apps ShimLinker.quirkBundleIDs names.
+build libipaquirks.dylib ipa-quirks.m -O2 -fobjc-arc -framework Foundation
 # The neutraliser's install name is rewritten per tweak to the tweak's own,
 # which may be longer than this one: ask the linker for header room (the
 # legacy script built it per tweak with the name already in place).

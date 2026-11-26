@@ -13,6 +13,11 @@
 //   text     the text field's contents as typed
 //   keychain a generic password added on the first launch and read back on
 //            every later one (the installer's keychain shim, or PlayChain)
+//   keychain-shared  the same with a shared access group in the data
+//            protection keychain, as Google's SSO stores its tokens
+//   groupdefaults / groupcf  a value in the signed app group's preferences,
+//            through NSUserDefaults(suiteName:) and the CFPreferences C API,
+//            added on the first launch and read back on every later one
 //   group    an app group's folder and whether a file could be written in it
 //            (the installer's app-group shim puts it inside the container)
 //   gl       which image dlsym(RTLD_DEFAULT, "glCreateShader") resolves to
@@ -91,6 +96,60 @@ static void groupContainerWrite(void) {
     && [NSFileManager.defaultManager createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:&error]
     && [@"group" writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:&error];
   plog(@"group write=%d path=%@ error=%@", wrote, dir.path ?: @"(nil)", error.localizedDescription ?: @"none");
+}
+
+// The app group the probe was signed with (make-probe-ipa.sh records it in
+// Info.plist as ProbeAppGroup), so a test can give each run a fresh group.
+static NSString *signedAppGroup(void) {
+  return [NSBundle.mainBundle objectForInfoDictionaryKey:@"ProbeAppGroup"] ?: @"group.local.ipa-install-on-mac.probe";
+}
+
+// The app group's preferences, through both APIs Google's SDKs use:
+// NSUserDefaults(suiteName:) and the CFPreferences C functions
+// (GoogleUtilities' GULUserDefaults). Read back if an earlier launch stored
+// them, else store them; a store that does not persist logs "add" every time.
+static void groupDefaultsRoundTrip(void) {
+  NSString *group = signedAppGroup();
+  NSString *value = [NSString stringWithFormat:@"g-%.0f", NSDate.date.timeIntervalSince1970];
+  NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:group];
+  NSString *stored = [defaults stringForKey:@"probe"];
+  if (stored) {
+    plog(@"groupdefaults read=%@", stored);
+  } else {
+    [defaults setObject:value forKey:@"probe"];
+    plog(@"groupdefaults miss add=%@ sync=%d", value, [defaults synchronize]);
+  }
+  CFStringRef app = (__bridge CFStringRef)group;
+  CFPropertyListRef cf = CFPreferencesCopyAppValue(CFSTR("probe-cf"), app);
+  if (cf && CFGetTypeID(cf) == CFStringGetTypeID()) {
+    plog(@"groupcf read=%@", (__bridge NSString *)cf);
+  } else {
+    CFPreferencesSetAppValue(CFSTR("probe-cf"), (__bridge CFStringRef)value, app);
+    plog(@"groupcf miss add=%@ sync=%d", value, CFPreferencesAppSynchronize(app));
+  }
+  if (cf) CFRelease(cf);
+}
+
+// A generic password the way Google's SSO stores its tokens: a shared access
+// group and the data protection keychain.
+static void sharedKeychainRoundTrip(void) {
+  NSDictionary *base = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                         (__bridge id)kSecAttrService: @"ipa-probe-shared", (__bridge id)kSecAttrAccount: @"probe",
+                         (__bridge id)kSecAttrAccessGroup: @"TEAM123456.local.ipa-install-on-mac.shared",
+                         (__bridge id)kSecUseDataProtectionKeychain: @YES};
+  NSMutableDictionary *query = [base mutableCopy];
+  query[(__bridge id)kSecReturnData] = @YES;
+  CFTypeRef result = NULL;
+  OSStatus rc = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+  if (rc == errSecSuccess && result) {
+    NSString *v = [[NSString alloc] initWithData:(__bridge_transfer NSData *)result encoding:NSUTF8StringEncoding];
+    plog(@"keychain-shared read=%@", v);
+    return;
+  }
+  NSString *value = [NSString stringWithFormat:@"s-%.0f", NSDate.date.timeIntervalSince1970];
+  NSMutableDictionary *item = [base mutableCopy];
+  item[(__bridge id)kSecValueData] = [value dataUsingEncoding:NSUTF8StringEncoding];
+  plog(@"keychain-shared miss=%d add=%d value=%@", (int)rc, (int)SecItemAdd((__bridge CFDictionaryRef)item, NULL), value);
 }
 
 static void glLookup(void) {
@@ -229,6 +288,8 @@ static void glLookup(void) {
   [NSFileManager.defaultManager createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:NULL];
   logPath = [docs stringByAppendingPathComponent:@"probe.log"];
   keychainRoundTrip();
+  sharedKeychainRoundTrip();
+  groupDefaultsRoundTrip();
   groupContainerWrite();
   glLookup();
   return YES;

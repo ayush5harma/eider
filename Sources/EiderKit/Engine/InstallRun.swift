@@ -193,7 +193,9 @@ final class InstallRun: @unchecked Sendable {
         emit(.link, "Linking helper libraries", 0.66)
         let linker = ShimLinker(app: app, executable: executableURL)
         var added: [URL] = []
-        for (shim, label) in ShimLinker.shimsToLink(keychain: options.keychainShim, linkedDylibs: linkedDylibs) {
+        // The IPA's own id: a quirk is about the app's code, which --bundle-id does not change.
+        let wanted = ShimLinker.shimsToLink(keychain: options.keychainShim, linkedDylibs: linkedDylibs, bundleID: identity.shippedID)
+        for (shim, label) in wanted {
             added.append(try linker.link(try shims.url(for: shim), as: shim.rawValue, installName: shim.installName, label: label))
         }
         for extra in extras {

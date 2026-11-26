@@ -41,8 +41,12 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   framework each one corrects: `libipagles` (OpenGLES), `libipacallkit`
   (CallKit) and `libipacamera` (AVFoundation). The decision is
   `ShimLinker.shimsToLink`; a dylib path read from an IPA is only compared to
-  those fixed framework names, never used to build a path. `libipaneutralised`
-  is the empty stand-in for a keychain-fix tweak.
+  those fixed framework names, never used to build a path. `libipaquirks`
+  holds per-app workarounds for an app's own code under Catalyst and is linked
+  last, only when the IPA's own bundle id is exactly one in
+  `ShimLinker.quirkBundleIDs` (today YouTube, whose launch sequence loses the
+  race with Catalyst's late first scene and leaves a blank window).
+  `libipaneutralised` is the empty stand-in for a keychain-fix tweak.
 - The app is signed with a fixed sandbox entitlement set plus one thing read
   from the IPA: `com.apple.security.application-groups`. `AppGroups.read`
   takes it from the main executable's own signature
@@ -54,7 +58,12 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   group id must be plain letters, digits, `.`, `-`, `_` (at most 255 bytes, at
   most 32 groups, no `..`), because the groups shim turns it into a path; others
   are dropped with an install warning. `libipagroups` still redirects the
-  container, since macOS refuses an ad hoc app the real one.
+  container, since macOS refuses an ad hoc app the real one, and stores each
+  signed group's preferences (NSUserDefaults suites and the CFPreferences
+  functions) under the domain `ipagroups.<group>` in the app's own container:
+  launched through LaunchServices, cfprefsd refuses every write to a domain
+  named after one of the app's groups, so a sign-in kept there was lost at
+  each relaunch.
 - Nothing from an IPA or a source is trusted: https only (http for loopback
   only for a source added by a loopback address and its items, never from a
   remote source, a redirect from https or an `eider://` link; plus file URLs
