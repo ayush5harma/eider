@@ -37,6 +37,18 @@ final class ShimLinkerDecisionTests: XCTestCase {
         XCTAssertEqual(shims(linked), [.keychain, .gles, .callKit, .camera, .groups])
     }
 
+    func testYouTubeGetsTheQuirksShimLast() {
+        let result = ShimLinker.shimsToLink(keychain: true, linkedDylibs: [], bundleID: "com.google.ios.youtube").map(\.shim)
+        XCTAssertEqual(result, [.keychain, .groups, .quirks])
+    }
+
+    func testOnlyAnExactBundleIDGetsTheQuirksShim() {
+        for id in ["", "com.example.app", "com.google.ios.youtubemusic", "com.google.ios.youtube.extension", "COM.GOOGLE.IOS.YOUTUBE"] {
+            let result = ShimLinker.shimsToLink(keychain: true, linkedDylibs: [], bundleID: id).map(\.shim)
+            XCTAssertFalse(result.contains(.quirks), id)
+        }
+    }
+
     func testKeychainOptOutDropsOnlyTheKeychainShim() {
         XCTAssertEqual(shims(keychain: false, ["\(system)/CallKit.framework/CallKit"]), [.callKit, .groups])
     }

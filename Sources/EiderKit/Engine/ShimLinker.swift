@@ -16,8 +16,10 @@ struct ShimLinker {
     /// app-group shim always. `linkedDylibs` is every dylib path any binary
     /// of the bundle links, which the legacy installer searched the same way
     /// (any binary, not just the main executable); a path is only compared
-    /// to fixed framework names, never used to build a path.
-    static func shimsToLink(keychain: Bool, linkedDylibs: [String]) -> [(shim: Shim, label: String)] {
+    /// to fixed framework names, never used to build a path. The quirks shim
+    /// is linked last and only when `bundleID` (the installed app's) is
+    /// exactly one it has a workaround for (`quirkBundleIDs`).
+    static func shimsToLink(keychain: Bool, linkedDylibs: [String], bundleID: String = "") -> [(shim: Shim, label: String)] {
         func links(_ framework: String) -> Bool {
             linkedDylibs.contains { $0.contains("/\(framework).framework/") }
         }
@@ -27,8 +29,12 @@ struct ShimLinker {
         if links("CallKit") { wanted.append((.callKit, "the CallKit shim")) }
         if links("AVFoundation") { wanted.append((.camera, "the camera shim")) }
         wanted.append((.groups, "the app-group shim"))
+        if quirkBundleIDs.contains(bundleID) { wanted.append((.quirks, "the app-quirks shim")) }
         return wanted
     }
+
+    /// The apps Shims/ipa-quirks.m has a workaround for; keep the two in step.
+    static let quirkBundleIDs: Set<String> = ["com.google.ios.youtube"]
 
     /// Install `source` as `Frameworks/<name>` and link it. Returns the copy,
     /// which the signing step must cover.

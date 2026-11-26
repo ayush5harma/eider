@@ -41,8 +41,12 @@ Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
   framework each one corrects: `libipagles` (OpenGLES), `libipacallkit`
   (CallKit) and `libipacamera` (AVFoundation). The decision is
   `ShimLinker.shimsToLink`; a dylib path read from an IPA is only compared to
-  those fixed framework names, never used to build a path. `libipaneutralised`
-  is the empty stand-in for a keychain-fix tweak.
+  those fixed framework names, never used to build a path. `libipaquirks`
+  holds per-app workarounds for an app's own code under Catalyst and is linked
+  last, only when the IPA's own bundle id is exactly one in
+  `ShimLinker.quirkBundleIDs` (today YouTube, whose launch sequence loses the
+  race with Catalyst's late first scene and leaves a blank window).
+  `libipaneutralised` is the empty stand-in for a keychain-fix tweak.
 - The app is signed with a fixed sandbox entitlement set plus one thing read
   from the IPA: `com.apple.security.application-groups`. `AppGroups.read`
   takes it from the main executable's own signature
