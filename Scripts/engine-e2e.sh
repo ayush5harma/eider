@@ -176,6 +176,7 @@ if launch; then
   check "embedded framework loaded" logged 'probekit ok'
   check "GL lookup answers OpenGL ES, not desktop libGL" logged 'gl lookup=OpenGLES '
   check "a quirk row forced the BOOL getter and left the NSInteger getter alone" logged 'quirk switch=1 count=7$'
+  check "the signature's team id answers the keychain shim's seed, not nothing" logged 'teamid=[A-Z0-9]{10} seed=[A-Z0-9]{10} same=1$'
   check "keychain item stored (shim)" logged 'keychain miss=.* add=0 '
   check "app-group folder is in the container and writable" \
     logged 'group write=1 path=.*/Library/Containers/[^/]+/Data/Library/Group Containers/group\.ipa\.probe\.shared '

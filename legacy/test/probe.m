@@ -15,6 +15,8 @@
 //            every later one (the installer's keychain shim, or PlayChain)
 //   keychain-shared  the same with a shared access group in the data
 //            protection keychain, as Google's SSO stores its tokens
+//   teamid   the team id the app reads from its own signature, and whether it
+//            is the seed of the keychain shim's access groups
 //   keychain-flags  a synchronizable item with an access group, read back
 //            with query flags that describe no item, then updated and deleted
 //            by access group
@@ -106,6 +108,33 @@ static void groupContainerWrite(void) {
     && [NSFileManager.defaultManager createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:&error]
     && [@"group" writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:&error];
   plog(@"group write=%d path=%@ error=%@", wrote, dir.path ?: @"(nil)", error.localizedDescription ?: @"none");
+}
+
+// SecTask is in the Security framework but not in the iOS headers.
+typedef struct __SecTask *SecTaskRef;
+extern SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef allocator);
+extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error);
+
+// The team id an app reads from its own signature (LiveContainer crashed on
+// the NULL an ad hoc signature answers), beside the seed the keychain shim
+// puts before every access group it makes up: an app that derives one from
+// the other must see the same ten characters.
+static void teamIdReport(void) {
+  SecTaskRef task = SecTaskCreateFromSelf(NULL);
+  CFTypeRef value = task ? SecTaskCopyValueForEntitlement(task, CFSTR("com.apple.developer.team-identifier"), NULL) : NULL;
+  if (task) CFRelease(task);
+  id answer = (__bridge_transfer id)value;
+  NSString *team = [answer isKindOfClass:NSString.class] ? answer : @"(none)";
+  NSDictionary *query = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                          (__bridge id)kSecAttrService: @"ipa-probe", (__bridge id)kSecAttrAccount: @"probe",
+                          (__bridge id)kSecReturnAttributes: @YES};
+  CFTypeRef attrs = NULL;
+  NSString *seed = @"(none)";
+  if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &attrs) == errSecSuccess) {
+    NSString *group = ((__bridge_transfer NSDictionary *)attrs)[(__bridge id)kSecAttrAccessGroup];
+    seed = [group componentsSeparatedByString:@"."].firstObject ?: @"(none)";
+  }
+  plog(@"teamid=%@ seed=%@ same=%d", team, seed, [team isEqualToString:seed]);
 }
 
 // The app group the probe was signed with (make-probe-ipa.sh records it in
@@ -448,6 +477,7 @@ static void glLookup(void) {
   [NSFileManager.defaultManager createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:NULL];
   logPath = [docs stringByAppendingPathComponent:@"probe.log"];
   keychainRoundTrip();
+  teamIdReport();
   sharedKeychainRoundTrip();
   flaggedKeychainRoundTrip();
   groupDefaultsRoundTrip();

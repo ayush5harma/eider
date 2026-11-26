@@ -272,6 +272,46 @@ static void redirect_group_preferences(void) {
     original_remove_domain = (suite_fn)swap(d, @selector(removePersistentDomainForName:), (IMP)groups_remove_persistent_domain);
 }
 
+// ── Team identifier ─────────────────────────────────────────────────────────
+// Why: some apps read their team id from their own signature and use it
+// without a nil check. LiveContainer 3.8.0's +[LCSharedUtils teamIdentifier]
+// passes SecTaskCopyValueForEntitlement(self,
+// "com.apple.developer.team-identifier") to CFGetTypeID, and an ad hoc
+// signature has no team id (it cannot: a signature that claims one is
+// killed), so it crashed with EXC_BAD_ACCESS at every launch (measured
+// 2026-11-27, compatibility sweep, macOS 27.3).
+//
+// What: when macOS answers nothing for that one key, the answer is a
+// synthetic team id: the same ten characters the keychain shim puts before
+// every access group it makes up (ipa-keychain.c, access_group(): FNV-1a of
+// the bundle id in a 32-letter alphabet), so an app that derives one from the
+// other sees them agree; the e2e probe checks that they do. Every other key,
+// and a real answer for this one, pass through unchanged.
+
+static CFStringRef const kTeamIdentifier = CFSTR("com.apple.developer.team-identifier");
+static CFStringRef synthetic_team;
+
+static CFStringRef team_identifier(void) {
+    if (synthetic_team) return synthetic_team;
+    NSString *bid = NSBundle.mainBundle.bundleIdentifier ?: @"app";
+    unsigned long long h = 1469598103934665603ULL;
+    for (const char *c = bid.UTF8String; *c; c++) { h ^= (unsigned char)*c; h *= 1099511628211ULL; }
+    static const char alpha[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    char seed[11];
+    for (int i = 0; i < 10; i++) { seed[i] = alpha[h % 32]; h /= 32; }
+    seed[10] = 0;
+    synthetic_team = CFStringCreateWithCString(kCFAllocatorDefault, seed, kCFStringEncodingUTF8);
+    return synthetic_team;
+}
+
+static CFTypeRef groups_copy_entitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error) {
+    CFTypeRef value = SecTaskCopyValueForEntitlement(task, entitlement, error);
+    if (value != NULL || entitlement == NULL || !CFEqual(entitlement, kTeamIdentifier)) return value;
+    if (error && *error) { CFRelease(*error); *error = NULL; }
+    return CFRetain(team_identifier());
+}
+DYLD_INTERPOSE(groups_copy_entitlement, SecTaskCopyValueForEntitlement)
+
 __attribute__((constructor)) static void ipagroups_install(void) {
     Method m = class_getInstanceMethod([NSFileManager class],
                                        @selector(containerURLForSecurityApplicationGroupIdentifier:));
