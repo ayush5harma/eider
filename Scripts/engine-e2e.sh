@@ -15,7 +15,12 @@
 #               container, a keychain item survives a relaunch, and after a
 #               kill -9 a keychain item with a shared access group and the
 #               app group's preferences (NSUserDefaults and the CFPreferences
-#               C API, written on the group's first launch) are read back
+#               C API, written on the group's first launch) are read back,
+#               as are the group's preferences seen as a persistent domain, an
+#               unsigned group's suite, a SQLite database and a coordinated
+#               file in the group's folder, and a synchronizable keychain item
+#               found with query flags that describe no item, then updated
+#               and deleted by access group
 #   mac idiom   --mac-idiom runs the app in the Mac idiom, and a prebuilt
 #               --dylib is linked and loads
 # plus: the registry holds the app, and uninstall removes it.
@@ -170,6 +175,10 @@ if launch; then
   check "shared-access-group keychain item stored (shim)" logged 'keychain-shared miss=.* add=0 '
   check "app-group preferences written on the group's first launch (NSUserDefaults)" logged 'groupdefaults miss add=g-'
   check "app-group preferences written on the group's first launch (CFPreferences)" logged 'groupcf miss add=g-'
+  check "flagged keychain item stored (synchronizable, access group, AfterFirstUnlockThisDeviceOnly)" logged 'keychain-flags miss=.* add=0 '
+  check "an unsigned group's preferences written" logged 'unsigned miss add=q-'
+  check "SQLite database written in the app group's folder" logged 'groupsql miss add=q-[0-9]+ rc=0'
+  check "coordinated file written in the app group's folder" logged 'groupcoord miss add=q-[0-9]+ wrote=1'
 else
   bad "the probe did not launch"
 fi
@@ -180,6 +189,14 @@ if launch; then
   check "shared-access-group keychain item read back after kill -9 and relaunch" logged 'keychain-shared read=s-'
   check "app-group preferences read back after kill -9 and relaunch (NSUserDefaults)" logged 'groupdefaults read=g-'
   check "app-group preferences read back after kill -9 and relaunch (CFPreferences)" logged 'groupcf read=g-'
+  check "keychain item found with flags that describe no item, then updated and deleted by access group" \
+    logged 'keychain-flags read=f-[0-9]+ pdmn=cku sync=1 update=0 reread=updated delete=0 gone=-25300'
+  check "app-group preferences read back as a persistent domain" logged 'groupdomain probe=g-'
+  check "an unsigned group's preferences read back after kill -9 and relaunch" logged 'unsigned read=q-'
+  check "SQLite database in the app group's folder read back after kill -9 and relaunch" logged 'groupsql read=q-'
+  check "coordinated file in the app group's folder read back after kill -9 and relaunch" logged 'groupcoord read=q-'
+  if logged 'kvs read=q-'; then ok "NSUbiquitousKeyValueStore value read back after kill -9 and relaunch"
+  else skip "NSUbiquitousKeyValueStore did not keep its value (no iCloud entitlement): $(since | grep -E ' kvs ' | tail -n 1)"; fi
 else
   bad "the probe did not relaunch"
 fi
