@@ -12,7 +12,10 @@
 #               extra sandbox exceptions, the IPA's application-groups entitlement
 #               carried into the signature, embedded framework loads, GL lookups
 #               answer OpenGL ES, an app-group folder is writable in the
-#               container, a keychain item survives a relaunch
+#               container, a keychain item survives a relaunch, and after a
+#               kill -9 a keychain item with a shared access group and the
+#               app group's preferences (NSUserDefaults and the CFPreferences
+#               C API, written on the group's first launch) are read back
 #   mac idiom   --mac-idiom runs the app in the Mac idiom, and a prebuilt
 #               --dylib is linked and loads
 # plus: the registry holds the app, and uninstall removes it.
@@ -20,7 +23,10 @@
 # Everything installs into a temporary --dest and a temporary EIDER_HOME,
 # never /Applications. Left behind: nothing this script can remove; the
 # probe's container is emptied (its root belongs to containermanagerd) and
-# the copies the installer trashed are deleted from ~/.Trash again.
+# the copies the installer trashed are deleted from ~/.Trash again. The probe
+# is signed with a fresh app group per run, because the group's first launch
+# is the case under test and macOS keeps a group container after its app is
+# gone; the run removes it again where macOS lets it.
 #
 # Usage: Scripts/engine-e2e.sh
 
@@ -30,6 +36,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BID=local.ipa-install-on-mac.probe
 CONTAINER="$HOME/Library/Containers/$BID/Data"
 LOG="$CONTAINER/Documents/probe.log"
+GROUP="group.local.eider-e2e.$(date +%s)$RANDOM"
+GROUP_CONTAINER="$HOME/Library/Group Containers/$GROUP"
 # Physical path: pkill/pgrep match the /private/var form of a $TMPDIR path.
 W=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/eider-e2e.XXXXXX")" && pwd -P)
 APP="$W/apps/IPA Probe.app"
@@ -64,7 +72,18 @@ clean_trash() {
   done
   return 0
 }
-cleanup() { quit_probe; empty_container; clean_trash; rm -rf "$W"; }
+kill_probe() {   # as a crash or Force Quit would: no chance to save anything
+  pkill -KILL -f "$APP/Probe" 2>/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f "$APP/Probe" >/dev/null || return 0
+    sleep 0.3
+  done
+}
+remove_group_container() {
+  [ -d "$GROUP_CONTAINER" ] || return 0
+  rm -rf "$GROUP_CONTAINER" 2>/dev/null || echo "note: could not remove $GROUP_CONTAINER"
+}
+cleanup() { quit_probe; empty_container; remove_group_container; clean_trash; rm -rf "$W"; }
 trap cleanup EXIT
 
 # ── Build (with developer tools: this part is the test rig, not the product) ──
@@ -72,7 +91,7 @@ echo "Building eider, the shims and the probe ..."
 (cd "$ROOT" && swift build >"$W/build.log" 2>&1) || { cat "$W/build.log"; echo "swift build failed"; exit 2; }
 BIN="$(cd "$ROOT" && swift build --show-bin-path)/eider"
 "$ROOT/Scripts/build-shims.sh" >"$W/shims.log" 2>&1 || { cat "$W/shims.log"; echo "build-shims failed"; exit 2; }
-"$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe.ipa" >/dev/null || { echo "could not build the probe (needs Xcode's iOS SDK)"; exit 2; }
+PROBE_APP_GROUP="$GROUP" "$ROOT/legacy/test/make-probe-ipa.sh" "$W/probe.ipa" >/dev/null || { echo "could not build the probe (needs Xcode's iOS SDK)"; exit 2; }
 xcrun clang -target arm64-apple-ios14.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -dynamiclib \
   -install_name @rpath/extra.dylib -o "$W/extra.dylib" "$ROOT/legacy/test/extra.c" || { echo "could not build the extra dylib"; exit 2; }
 unzip -q -o "$W/probe.ipa" 'Payload/Probe.app/Probe' -d "$W/x"
@@ -130,7 +149,7 @@ check "the binary is Mac Catalyst" catalyst
 check "the binary keeps its own SDK ($SDK)" stamped_sdk "$SDK"
 check "sandboxed" has_entitlement app-sandbox
 check "no sandbox exceptions beyond the base set" lacks_entitlement temporary-exception
-check "the IPA's own app group is carried into the new signature" has_entitlement group.local.ipa-install-on-mac.probe
+check "the IPA's own app group is carried into the new signature" has_entitlement "$GROUP"
 check "nothing else of the IPA's entitlements is carried (no application-identifier)" lacks_entitlement application-identifier
 check "OpenGL ES redirect linked (the probe links OpenGL ES)" links libipagles.dylib
 check "keychain shim linked" links libipakeychain.dylib
@@ -148,11 +167,19 @@ if launch; then
   check "keychain item stored (shim)" logged 'keychain miss=.* add=0 '
   check "app-group folder is in the container and writable" \
     logged 'group write=1 path=.*/Library/Containers/[^/]+/Data/Library/Group Containers/group\.ipa\.probe\.shared '
+  check "shared-access-group keychain item stored (shim)" logged 'keychain-shared miss=.* add=0 '
+  check "app-group preferences written on the group's first launch (NSUserDefaults)" logged 'groupdefaults miss add=g-'
+  check "app-group preferences written on the group's first launch (CFPreferences)" logged 'groupcf miss add=g-'
 else
   bad "the probe did not launch"
 fi
+sleep 2   # past the probe's writes; a kill -9 then stands for a crash or Force Quit
+kill_probe
 if launch; then
-  check "keychain item read back after relaunch (shim)" logged 'keychain read=v-'
+  check "keychain item read back after kill -9 and relaunch (shim)" logged 'keychain read=v-'
+  check "shared-access-group keychain item read back after kill -9 and relaunch" logged 'keychain-shared read=s-'
+  check "app-group preferences read back after kill -9 and relaunch (NSUserDefaults)" logged 'groupdefaults read=g-'
+  check "app-group preferences read back after kill -9 and relaunch (CFPreferences)" logged 'groupcf read=g-'
 else
   bad "the probe did not relaunch"
 fi
