@@ -9,12 +9,16 @@
 // Usage:
 //   swift Scripts/make-icon.swift Resources
 //
-// The picture is one glyph, as macOS 26 icons are: a drake common eider in
-// profile, floating, on a sea-blue gradient. What makes it an eider and not
-// any duck is kept and everything else is dropped: the white back and breast,
-// black flanks and tail, black cap, sea-green nape, and above all the wedge
-// head, where the forehead runs in one straight line out to the bill tip.
-// Six flat layers in one glass group; the system supplies the depth.
+// The picture is an abstract mark taken from the drake common eider's bill,
+// full bleed in the squircle: the bill as one amber wedge sweeping from the
+// top-left corner to a rounded tip near the bottom-right, its top line
+// (culmen) dead straight as the eider's forehead-to-tip line is; the pale
+// lobe the bill sends up into the forehead as a lime leaf crossing that line;
+// the black cap as the ink ground; the sea-green nape as the plane below, with
+// a sliver of ink between it and the bill where the bill closes. No eye, no
+// head outline: a mark first, a bill second. (0.1.0 drew a feather and 0.1.3
+// a whole drake; both were dropped for this.) Three layers in two glass
+// groups; the system supplies the depth.
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -35,129 +39,101 @@ func gradient(_ stops: [(CGFloat, CGColor)]) -> CGGradient {
     CGGradient(colorsSpace: space, colors: stops.map(\.1) as CFArray, locations: stops.map(\.0))!
 }
 
-func circle(_ c: CGPoint, _ r: CGFloat) -> CGPath {
-    CGPath(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r), transform: nil)
+func lerp(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint { p(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t) }
+
+func stroked(_ path: CGPath, _ width: CGFloat) -> CGPath {
+    path.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 10)
 }
 
-// MARK: - Palette
-
-struct Paint {
-    var hex: UInt32
-    var top: UInt32 // flattened icns only: light from above
-    var bottom: UInt32
+// Morphological opening: rounds every convex corner sharper than r to radius r
+// and leaves gentler curves alone.
+func roundConvex(_ path: CGPath, _ r: CGFloat) -> CGPath {
+    let eroded = path.subtracting(stroked(path, 2 * r))
+    return eroded.union(stroked(eroded, 2 * r))
 }
 
-let white = Paint(hex: 0xF4F6F9, top: 0xFFFFFF, bottom: 0xD3DCE7)
-let black = Paint(hex: 0x22252D, top: 0x3B404B, bottom: 0x1C1E25)
-let seaGreen = Paint(hex: 0x94DCC2, top: 0xB2EBD6, bottom: 0x7FCBB0)
-let billYellow = Paint(hex: 0xE2C55E, top: 0xF0D77C, bottom: 0xCDAE45)
-let backgroundLight: (UInt32, UInt32) = (0x7CCBEA, 0x2A6DB0)
-let backgroundDark: (UInt32, UInt32) = (0x22364B, 0x0C1623)
+// Shapes run off the canvas on purpose (full bleed); clip them to a margin
+// box so the SVGs stay small. The system clips to the squircle anyway.
+let bleed = CGPath(rect: CGRect(x: -40, y: -40, width: 1104, height: 1104), transform: nil)
 
-// MARK: - The drake, in the 1024 pt icon canvas (y up)
+// MARK: - Palette (the drake's head, pushed vivid)
 
-// Upper tangent point on a circle for a line from the outside point t.
-func upperTangent(c: CGPoint, r: CGFloat, from t: CGPoint) -> CGPoint {
-    let dx = t.x - c.x, dy = t.y - c.y
-    let a = atan2(dy, dx), b = acos(r / (dx * dx + dy * dy).squareRoot())
-    return p(c.x + r * cos(a + b), c.y + r * sin(a + b))
+// A two-stop linear gradient. start/stop are in the unit square with y DOWN,
+// Icon Composer's convention, so the same values feed icon.json and the icns.
+struct Fill {
+    var from: UInt32
+    var to: UInt32
+    var start = p(0.5, 0)
+    var stop = p(0.5, 1)
 }
+
+let amber = Fill(from: 0xFFE27A, to: 0xFF9F1C, start: p(0.2, 0.1), stop: p(0.9, 0.8))
+let amberDark = Fill(from: 0xFFD55C, to: 0xF08A12, start: p(0.2, 0.1), stop: p(0.9, 0.8))
+let lime = Fill(from: 0xEEFF9A, to: 0xA8E04A)
+let sea = Fill(from: 0x7FF2D2, to: 0x14A8A0, start: p(0.2, 0), stop: p(0.8, 1))
+let seaDark = Fill(from: 0x52D9BC, to: 0x0E7F86, start: p(0.2, 0), stop: p(0.8, 1))
+let ink = Fill(from: 0x24345C, to: 0x0B1226, start: p(0.3, 0), stop: p(0.7, 1))
+let inkDark = Fill(from: 0x141C30, to: 0x05080F, start: p(0.3, 0), stop: p(0.7, 1))
+
+// MARK: - The mark, in the 1024 pt layer canvas (y up; the system maps it onto the squircle)
 
 struct Layer {
     var name: String
     var path: CGPath
-    var paint: Paint
-    var glass = true
+    var fill: Fill
+    var dark: Fill
+    var opacity: CGFloat = 1
 }
 
-func drake() -> [Layer] {
-    let c = p(645, 625), r: CGFloat = 122
-    func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint { p(c.x + x * r, c.y + y * r) }
+struct Group {
+    var layers: [Layer] // back to front
+    var translucency: Double
+}
 
-    // Head: the crown circle plus a wedge whose top edge is tangent to it, so
-    // forehead and bill are one line.
-    let tipTop = at(2.5, -0.55), tipBottom = at(2.44, -0.85)
-    let t = upperTangent(c: c, r: r, from: tipTop)
-    let chin = at(cos(-62 * .pi / 180), sin(-62 * .pi / 180))
-    let wedge = CGMutablePath()
-    wedge.move(to: c)
-    wedge.addLine(to: t)
-    wedge.addLine(to: tipTop)
-    wedge.addQuadCurve(to: tipBottom, control: at(2.6, -0.69))
-    wedge.addLine(to: chin)
-    wedge.closeSubpath()
+// A wedge from off the left edge to a rounded tip: straight culmen from a to
+// the tip, gape from the tip back to b, bowed by `bow` at its middle (positive
+// bows it up into the wedge), the tip rounded to `tipRound`.
+func bill(culmenFrom a: CGPoint, tip t: CGPoint, gapeFrom b: CGPoint, bow: CGFloat, tipRound: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    path.move(to: a)
+    path.addLine(to: t)
+    let mid = lerp(t, b, 0.5)
+    let dx = b.x - t.x, dy = b.y - t.y, len = (dx * dx + dy * dy).squareRoot()
+    path.addQuadCurve(to: b, control: p(mid.x + dy / len * bow, mid.y - dx / len * bow))
+    path.closeSubpath()
+    return roundConvex(path, tipRound).intersection(bleed)
+}
 
-    let neck = CGMutablePath()
-    neck.move(to: at(-0.98, -0.2))
-    neck.addCurve(to: p(490, 505), control1: p(c.x - 1.05 * r, 560), control2: p(520, 520))
-    neck.addLine(to: p(770, 470))
-    neck.addCurve(to: at(0.55, -0.72), control1: p(745, 510), control2: p(c.x + 0.6 * r, 560))
-    neck.closeSubpath()
-    let head = circle(c, r).union(wedge).union(neck)
+func mark() -> [Group] {
+    let billPath = bill(culmenFrom: p(-200, 1190), tip: p(960, 300), gapeFrom: p(-200, 400), bow: 30, tipRound: 70)
 
-    // Floating body: a short raised tail, flat back, full breast.
-    let body = CGMutablePath()
-    body.move(to: p(165, 478))
-    body.addCurve(to: p(430, 518), control1: p(250, 505), control2: p(340, 520))
-    body.addLine(to: p(540, 515))
-    body.addCurve(to: p(805, 410), control1: p(705, 515), control2: p(810, 480))
-    body.addCurve(to: p(630, 285), control1: p(800, 320), control2: p(725, 285))
-    body.addLine(to: p(365, 285))
-    body.addCurve(to: p(165, 478), control1: p(260, 285), control2: p(190, 375))
-    body.closeSubpath()
+    // The lobe: a long leaf that starts inside the bill and climbs across the
+    // culmen off the top edge.
+    let lobe = CGMutablePath()
+    lobe.move(to: p(560, 470))
+    lobe.addQuadCurve(to: p(250, 1180), control: p(640, 900))
+    lobe.addLine(to: p(-40, 1180))
+    lobe.addQuadCurve(to: p(560, 470), control: p(180, 680))
+    lobe.closeSubpath()
 
-    // Bill: the far part of the wedge, its base bowed forward the way the
-    // eider's feathering runs out onto the bill.
-    let b1 = p(t.x + (tipTop.x - t.x) * 0.30, t.y + (tipTop.y - t.y) * 0.30)
-    let b2 = p(b1.x, chin.y + (tipBottom.y - chin.y) * ((b1.x - chin.x) / (tipBottom.x - chin.x)))
-    let billMask = CGMutablePath()
-    billMask.move(to: b1)
-    billMask.addCurve(to: b2, control1: p(b1.x + 0.3 * r, b1.y - 0.3 * r), control2: p(b2.x + 0.3 * r, b2.y + 0.22 * r))
-    billMask.addLine(to: p(b2.x, b2.y - r))
-    billMask.addLine(to: at(4, -2))
-    billMask.addLine(to: at(4, 2))
-    billMask.addLine(to: p(b1.x, b1.y + r))
-    billMask.closeSubpath()
+    // The nape: its top edge runs just under the gape, leaving a sliver of
+    // ink between them that widens towards the tip.
+    let nape = CGMutablePath()
+    nape.move(to: p(-120, -120))
+    nape.addLine(to: p(-120, 340))
+    nape.addCurve(to: p(1180, 110), control1: p(300, 250), control2: p(800, 150))
+    nape.addLine(to: p(1180, -120))
+    nape.closeSubpath()
 
-    // Cap: above a line from the back of the crown, over the eye, to the bill.
-    let capMask = CGMutablePath()
-    capMask.move(to: at(-1.4, 0.1))
-    capMask.addCurve(to: p(b1.x - 0.02 * r, b1.y - 0.06 * r), control1: at(-0.3, 0.3), control2: at(0.45, 0.3))
-    capMask.addLine(to: at(4, 3))
-    capMask.addLine(to: at(-2, 3))
-    capMask.closeSubpath()
-
-    // Nape: a sea-green wash down the back of the head, under the cap.
-    let napeMask = CGMutablePath()
-    napeMask.move(to: at(-0.42, 0.6))
-    napeMask.addCurve(to: at(-1.3, -0.85), control1: at(-0.3, -0.15), control2: at(-0.75, -0.6))
-    napeMask.addLine(to: at(-2, 0.6))
-    napeMask.closeSubpath()
-
-    // Flanks and tail: black below a long S from the tail to under the breast.
-    let flankMask = CGMutablePath()
-    flankMask.move(to: p(150, 540))
-    flankMask.addCurve(to: p(690, 250), control1: p(380, 470), control2: p(470, 300))
-    flankMask.addLine(to: p(100, 200))
-    flankMask.closeSubpath()
-
-    let layers = [
-        Layer(name: "body", path: body.union(head), paint: white),
-        Layer(name: "flank", path: body.intersection(flankMask), paint: black),
-        Layer(name: "nape", path: head.intersection(napeMask).subtracting(capMask), paint: seaGreen),
-        Layer(name: "cap", path: head.intersection(capMask).subtracting(billMask), paint: black),
-        Layer(name: "eye", path: circle(at(0.30, 0.06), 0.085 * r), paint: black, glass: false),
-        Layer(name: "bill", path: head.intersection(billMask), paint: billYellow),
+    return [
+        Group(layers: [
+            Layer(name: "nape", path: nape.intersection(bleed), fill: sea, dark: seaDark),
+        ], translucency: 0.3),
+        Group(layers: [
+            Layer(name: "bill", path: billPath, fill: amber, dark: amberDark),
+            Layer(name: "lobe", path: roundConvex(lobe, 60).intersection(bleed), fill: lime, dark: lime, opacity: 0.8),
+        ], translucency: 0.35),
     ]
-    // Centre the glyph on the canvas at 90%, leaving the margin Apple's grid keeps.
-    let box = layers.reduce(CGRect.null) { $0.union($1.path.boundingBoxOfPath) }
-    var place = CGAffineTransform(translationX: canvas / 2, y: canvas / 2).scaledBy(x: 0.9, y: 0.9)
-        .translatedBy(x: -box.midX, y: -box.midY)
-    return layers.map { layer in
-        var moved = layer
-        moved.path = layer.path.copy(using: &place)!
-        return moved
-    }
 }
 
 // MARK: - Icon Composer bundle
@@ -184,36 +160,50 @@ func iconColor(_ hex: UInt32) -> String {
     return "srgb:\(parts.joined(separator: ",")),1.00000"
 }
 
-func writeIconBundle(_ layers: [Layer], to bundle: URL) throws {
+func gradientValue(_ f: Fill) -> [String: Any] {
+    [
+        "linear-gradient": [iconColor(f.from), iconColor(f.to)],
+        "orientation": ["start": ["x": f.start.x, "y": f.start.y], "stop": ["x": f.stop.x, "y": f.stop.y]],
+    ]
+}
+
+func writeIconBundle(_ groups: [Group], to bundle: URL) throws {
     let fm = FileManager.default
     try? fm.removeItem(at: bundle)
     let assets = bundle.appendingPathComponent("Assets")
     try fm.createDirectory(at: assets, withIntermediateDirectories: true)
-    for layer in layers {
+    for layer in groups.flatMap(\.layers) {
         let svg = """
             <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">\
-            <path fill="#\(String(format: "%06X", layer.paint.hex))" d="\(svgPathData(layer.path))"/></svg>
+            <path fill="#\(String(format: "%06X", layer.fill.from))" fill-rule="nonzero" d="\(svgPathData(layer.path))"/></svg>
 
             """
         try svg.write(to: assets.appendingPathComponent("\(layer.name).svg"), atomically: true, encoding: .utf8)
     }
-    func background(_ stops: (UInt32, UInt32)) -> [String: Any] {
-        [
-            "linear-gradient": [iconColor(stops.0), iconColor(stops.1)],
-            "orientation": ["start": ["x": 0.5, "y": 0], "stop": ["x": 0.5, "y": 1]],
+    func layerJSON(_ l: Layer) -> [String: Any] {
+        var json: [String: Any] = [
+            "name": l.name, "image-name": "\(l.name).svg", "glass": true,
+            "fill-specializations": [
+                ["value": gradientValue(l.fill)],
+                ["appearance": "dark", "value": gradientValue(l.dark)],
+            ],
         ]
+        if l.opacity < 1 { json["opacity"] = l.opacity }
+        return json
     }
-    // Icon Composer lists layers front first.
+    // Icon Composer lists groups and layers front first.
     let json: [String: Any] = [
         "fill-specializations": [
-            ["value": background(backgroundLight)],
-            ["appearance": "dark", "value": background(backgroundDark)],
+            ["value": gradientValue(ink)],
+            ["appearance": "dark", "value": gradientValue(inkDark)],
         ],
-        "groups": [[
-            "layers": layers.reversed().map { ["name": $0.name, "image-name": "\($0.name).svg", "glass": $0.glass] },
-            "shadow": ["kind": "neutral", "opacity": 0.5],
-            "translucency": ["enabled": true, "value": 0.4],
-        ]],
+        "groups": groups.reversed().map { g in
+            [
+                "layers": g.layers.reversed().map(layerJSON),
+                "shadow": ["kind": "neutral", "opacity": 0.5],
+                "translucency": ["enabled": true, "value": g.translucency],
+            ] as [String: Any]
+        },
         "supported-platforms": ["squares": ["macOS"]],
     ]
     let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
@@ -252,7 +242,16 @@ func squircle(_ rect: CGRect, radius r: CGFloat) -> CGPath {
     return path
 }
 
-func render(_ layers: [Layer], size: Int) -> CGImage {
+// Fills the current clip with f laid across box (y up), the way Icon
+// Composer lays a layer's gradient across that layer's bounds.
+func fillGradient(_ ctx: CGContext, _ f: Fill, over box: CGRect) {
+    func at(_ u: CGPoint) -> CGPoint { p(box.minX + u.x * box.width, box.maxY - u.y * box.height) }
+    ctx.drawLinearGradient(
+        gradient([(0, rgb(f.from)), (1, rgb(f.to))]), start: at(f.start), end: at(f.stop),
+        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+}
+
+func render(_ groups: [Group], size: Int) -> CGImage {
     let s = CGFloat(size)
     let ctx = CGContext(
         data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0, space: space,
@@ -266,49 +265,49 @@ func render(_ layers: [Layer], size: Int) -> CGImage {
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -s * 10 / 1024), blur: s * 22 / 1024, color: rgb(0, 0.32))
     ctx.addPath(tilePath)
-    ctx.setFillColor(rgb(backgroundLight.1))
+    ctx.setFillColor(rgb(ink.to))
     ctx.fillPath()
     ctx.restoreGState()
 
     ctx.saveGState()
     ctx.addPath(tilePath)
     ctx.clip()
-    ctx.drawLinearGradient(
-        gradient([(0, rgb(backgroundLight.0)), (1, rgb(backgroundLight.1))]),
-        start: p(0, tile.maxY), end: p(0, tile.minY), options: [])
+    fillGradient(ctx, ink, over: tile)
 
     // The layers were drawn for the full canvas, which the system maps onto the tile.
     ctx.translateBy(x: tile.minX, y: tile.minY)
     ctx.scaleBy(x: tile.width / canvas, y: tile.height / canvas)
     let px = canvas / tile.width // one device pixel, in canvas units
 
-    // The glass group's neutral shadow: the whole silhouette, soft, below.
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -s * 12 / 1024), blur: s * 28 / 1024, color: rgb(0x0A2340, 0.35))
-    ctx.addPath(layers[0].path)
-    ctx.setFillColor(rgb(white.hex))
-    ctx.fillPath()
-    ctx.restoreGState()
-
-    for layer in layers {
-        let box = layer.path.boundingBoxOfPath
+    for group in groups {
+        // Each glass group casts its neutral shadow as one silhouette.
+        let silhouette = group.layers.dropFirst().reduce(group.layers[0].path) { $0.union($1.path) }
         ctx.saveGState()
-        ctx.addPath(layer.path)
-        ctx.clip()
-        ctx.drawLinearGradient(
-            gradient([(0, rgb(layer.paint.top)), (1, rgb(layer.paint.bottom))]),
-            start: p(0, box.maxY), end: p(0, box.minY), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-        // Specular rim along each glass layer's edge, bright at the top.
-        if layer.glass && !small {
-            ctx.addPath(layer.path)
-            ctx.setLineWidth(3 * max(px, 1))
-            ctx.replacePathWithStrokedPath()
-            ctx.clip()
-            ctx.drawLinearGradient(
-                gradient([(0, rgb(0xFFFFFF, 0.65)), (0.5, rgb(0xFFFFFF, 0.08)), (1, rgb(0xFFFFFF, 0.2))]),
-                start: p(0, box.maxY), end: p(0, box.minY), options: [])
-        }
+        ctx.setShadow(offset: CGSize(width: 0, height: -s * 10 / 1024), blur: s * 26 / 1024, color: rgb(0x050A18, 0.4))
+        ctx.addPath(silhouette)
+        ctx.setFillColor(rgb(ink.to))
+        ctx.fillPath()
         ctx.restoreGState()
+
+        for layer in group.layers {
+            let box = layer.path.boundingBoxOfPath
+            ctx.saveGState()
+            ctx.setAlpha(layer.opacity)
+            ctx.addPath(layer.path)
+            ctx.clip()
+            fillGradient(ctx, layer.fill, over: box)
+            // Specular rim along each glass layer's edge, bright at the top.
+            if !small {
+                ctx.addPath(layer.path)
+                ctx.setLineWidth(4 * max(px, 1))
+                ctx.replacePathWithStrokedPath()
+                ctx.clip()
+                ctx.drawLinearGradient(
+                    gradient([(0, rgb(0xFFFFFF, 0.7)), (0.5, rgb(0xFFFFFF, 0.1)), (1, rgb(0xFFFFFF, 0.25))]),
+                    start: p(0, box.maxY), end: p(0, box.minY), options: [])
+            }
+            ctx.restoreGState()
+        }
     }
     ctx.restoreGState()
 
@@ -327,7 +326,7 @@ func render(_ layers: [Layer], size: Int) -> CGImage {
         ctx.replacePathWithStrokedPath()
         ctx.clip()
         ctx.drawLinearGradient(
-            gradient([(0, rgb(0xFFFFFF, 0.55)), (0.5, rgb(0xFFFFFF, 0.10)), (1, rgb(0xFFFFFF, 0.25))]),
+            gradient([(0, rgb(0xFFFFFF, 0.45)), (0.5, rgb(0xFFFFFF, 0.08)), (1, rgb(0xFFFFFF, 0.2))]),
             start: p(0, tile.maxY), end: p(0, tile.minY), options: [])
         ctx.restoreGState()
     }
@@ -350,16 +349,16 @@ guard CommandLine.arguments.count == 2 else {
     exit(2)
 }
 let resources = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-let layers = drake()
-try writeIconBundle(layers, to: resources.appendingPathComponent("AppIcon.icon"))
+let groups = mark()
+try writeIconBundle(groups, to: resources.appendingPathComponent("AppIcon.icon"))
 
 let work = FileManager.default.temporaryDirectory.appendingPathComponent("eider-icon-\(UUID().uuidString)")
 let iconset = work.appendingPathComponent("AppIcon.iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: work) }
 for base in [16, 32, 128, 256, 512] {
-    writePNG(render(layers, size: base), to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
-    writePNG(render(layers, size: base * 2), to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
+    writePNG(render(groups, size: base), to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
+    writePNG(render(groups, size: base * 2), to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
 }
 let task = Process()
 task.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
