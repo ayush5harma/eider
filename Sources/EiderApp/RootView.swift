@@ -19,6 +19,8 @@ struct RootView: View {
         }
         .task {
             await model.reload()
+            // Auto follows the display: rewrite it if Eider now runs on another one.
+            if Shared.snapshotDirectory == nil { await model.refreshAutoInterfaceScales() }
             // The launch check: stale sources only, in the background. Not in a
             // snapshot run, whose pictures must not depend on the network.
             if Shared.snapshotDirectory == nil { await model.refreshStaleSources() }

@@ -62,6 +62,8 @@ public final class AppModel {
     public internal(set) var diagnosis = DiagnosisState.idle
     public internal(set) var releaseCheck = ReleaseCheckState.idle
     public var errorMessage: String?
+    /// What the last interface-size change will do, for the Library to show.
+    public var interfaceScaleNotice: String?
 
     public internal(set) var settings: AppSettings
 

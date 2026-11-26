@@ -43,9 +43,19 @@ public protocol AppBackend: Sendable {
     ) async throws -> InstalledApp?
     func uninstall(bundleID: String, removeData: Bool) async throws
     func diagnose(_ app: InstalledApp) async -> LaunchResult
+    /// Records and writes an installed app's interface size (no reinstall).
+    func setInterfaceScale(_ scale: InterfaceScale, bundleID: String) async throws -> InterfaceScaleChange
+    /// Rewrites Auto for the display Eider runs on now; returns the ids changed.
+    func refreshAutoInterfaceScales() async throws -> [String]
 }
 
 extension AppBackend {
+    public func setInterfaceScale(_ scale: InterfaceScale, bundleID: String) async throws -> InterfaceScaleChange {
+        throw OperationFailure(code: "operations.unsupported", message: "This backend cannot change an app's interface size.")
+    }
+
+    public func refreshAutoInterfaceScales() async throws -> [String] { [] }
+
     /// For a backend that can only refresh everything.
     public func refreshSources(_ urls: [URL]) async throws -> [SourceRefreshResult] {
         try await refreshAllSources().filter { urls.contains($0.url) }
@@ -120,6 +130,14 @@ public struct LiveBackend: AppBackend {
 
     public func diagnose(_ app: InstalledApp) async -> LaunchResult {
         await probe.launch(app)
+    }
+
+    public func setInterfaceScale(_ scale: InterfaceScale, bundleID: String) async throws -> InterfaceScaleChange {
+        try await operations.setInterfaceScale(scale, bundleID: bundleID)
+    }
+
+    public func refreshAutoInterfaceScales() async throws -> [String] {
+        try await operations.refreshAutoInterfaceScales()
     }
 
     private func wrapped<T>(_ work: () async throws -> T) async throws -> T {
