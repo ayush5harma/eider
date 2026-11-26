@@ -1,5 +1,23 @@
 import Foundation
 
+/// One app's interface size as recorded and as its preferences hold it now.
+public struct InterfaceScaleState: Sendable, Equatable, Encodable {
+    /// nil: never set (installed before 0.1.9), so UIKit's 77% applies.
+    public let setting: InterfaceScale?
+    /// The factor in the app's preferences; nil means UIKit's default.
+    public let factor: Double?
+    public let macIdiom: Bool
+
+    public var summary: String {
+        if macIdiom { return "Mac idiom (1:1)" }
+        let percent = Int(((factor ?? 0.77) * 100).rounded())
+        guard let setting else {
+            return factor == nil ? "not set (77%, UIKit's iPad default)" : "not set by Eider (its preferences say \(percent)%)"
+        }
+        return setting == .auto ? "Auto (\(percent)% now)" : "\(setting.label)"
+    }
+}
+
 /// The result of changing one app's interface size.
 public struct InterfaceScaleChange: Sendable, Equatable {
     public let app: InstalledApp
@@ -22,6 +40,18 @@ extension AppOperations {
             let updated = installed.replacingOptions(options)
             try await library.record(updated)
             return InterfaceScaleChange(app: updated, message: message)
+        } catch {
+            throw OperationFailure.wrap(error)
+        }
+    }
+
+    public func interfaceScaleState(bundleID: String) async throws -> InterfaceScaleState {
+        do {
+            guard let installed = try await library.app(bundleID: bundleID) else { throw OperationFailure.notInstalled(bundleID) }
+            return InterfaceScaleState(
+                setting: installed.options.interfaceScale,
+                factor: preferences.storedFactor(bundleID: bundleID),
+                macIdiom: preferences.storedMacIdiom(bundleID: bundleID))
         } catch {
             throw OperationFailure.wrap(error)
         }

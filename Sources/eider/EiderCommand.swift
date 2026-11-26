@@ -10,7 +10,7 @@ struct EiderCommand: AsyncParsableCommand {
         version: EiderVersion.current,
         subcommands: [
             SourceCommand.self, SearchCommand.self, InfoCommand.self, InstallCommand.self,
-            ListCommand.self, UpdateCommand.self, UninstallCommand.self, OpenCommand.self,
+            ListCommand.self, UpdateCommand.self, UninstallCommand.self, OpenCommand.self, ScaleCommand.self,
             DoctorCommand.self,
         ]
     )

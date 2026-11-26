@@ -20,6 +20,9 @@ struct InstallCommand: AsyncParsableCommand {
     @Flag(name: .customLong("mac-idiom"), help: "Render in the Mac idiom (1:1 with the display).")
     var macIdiom = false
 
+    @Option(name: .customLong("interface-size"), help: "How large the app draws: \(interfaceSizeValues). Change it later with `eider scale`.")
+    var interfaceSize: InterfaceScale = .newInstallDefault
+
     @Flag(name: .customLong("no-keychain"), help: "No emulated keychain: logins will not survive a relaunch.")
     var noKeychain = false
 
@@ -91,7 +94,8 @@ struct InstallCommand: AsyncParsableCommand {
             bundleID: bundleID,
             removeExtensions: removeExtensions,
             resetData: reset,
-            force: force
+            force: force,
+            interfaceScale: interfaceSize
         )
     }
 
