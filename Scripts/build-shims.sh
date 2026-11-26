@@ -31,7 +31,7 @@ build() {
 
 build libipakeychain.dylib ipa-keychain.c -O2 -framework CoreFoundation -framework Security
 build libipagles.dylib ipa-gles.c -O2
-build libipagroups.dylib ipa-groups.m -O2 -fobjc-arc -framework Foundation
+build libipagroups.dylib ipa-groups.m -O2 -fobjc-arc -framework Foundation -framework Security
 # Calls: linked only into apps that link CallKit / AVFoundation (ShimLinker).
 build libipacallkit.dylib ipa-callkit.m -O2 -fobjc-arc -framework Foundation
 build libipacamera.dylib ipa-camera.m -O2 -fobjc-arc -framework Foundation -framework AVFoundation -framework CoreMedia
