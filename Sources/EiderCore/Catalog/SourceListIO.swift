@@ -330,7 +330,7 @@ public enum SourceListIO {
             case nil: continue
             case .success?: result.added.append(url.absoluteString)
             case .failure(let error)?:
-                let failure = OperationFailure.wrap(error)
+                let failure = error.codedFailure
                 result.failed.append(.init(url: url.absoluteString, error: "\(failure.message) (\(failure.code))"))
             }
         }

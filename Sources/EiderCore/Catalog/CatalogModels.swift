@@ -54,7 +54,7 @@ public struct CatalogApp: Codable, Sendable, Hashable {
     /// different apps under one bundle id (`CatalogMerge`).
     public var nameKey: String { Self.nameKey(name) }
 
-    static func nameKey(_ name: String) -> String {
+    public static func nameKey(_ name: String) -> String {
         name.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
     }
 

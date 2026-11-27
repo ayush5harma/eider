@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// Entries that share a bundle id and a name within one source are one app; see `CatalogMerge`.

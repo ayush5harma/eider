@@ -8,19 +8,29 @@ products.
 Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
             \                        /
                  EiderKit (Sources/EiderKit)
+                          |
+                 EiderCore (Sources/EiderCore)
 ```
 
-## EiderKit modules (one directory each, one owner each)
+EiderCore holds the platform-neutral half (catalog, downloads, update matching,
+paths, image cache, browse index) and also builds for iOS (docs/IOS.md).
+EiderKit re-exports it (`@_exported import EiderCore`), so the CLI and the Mac
+app import EiderKit alone. Directories marked (Core) below live in
+`Sources/EiderCore`; the rest in `Sources/EiderKit`.
+
+## Modules (one directory each, one owner each)
 
 | Directory | Holds | Key public names |
 |---|---|---|
-| `Support/` | paths, hashing, version, process runner | `EiderPaths`, `Hashing`, `EiderVersion` |
+| `Support/` (Core) | paths, hashing, version, display text, bundle-id check, image cache | `EiderPaths`, `Hashing`, `EiderVersion`, `DisplayText`, `BundleIdentifier`, `ImagePipeline` |
+| `Support/` | process runner | `ProcessRunner` |
 | `MachO/` | Mach-O reading and editing in pure Swift | thin to arm64, platform rewrite, add load command, change install name, encryption check |
 | `Engine/` | IPA to installed app | `Installer`, `InstallOptions`, `InstallEvent`, `InstallFailure` |
 | `Library/` | registry of installed apps, uninstall | `InstalledApp`, `LibraryStore`, `Uninstaller` |
-| `Catalog/` | source formats and the source list | `CatalogSource`, `CatalogApp`, `CatalogVersion`, `SourceParser`, `SourceStore` |
-| `Downloads/` | fetching IPAs | `DownloadManager`, `DownloadEvent` |
-| `Updates/` | installed version against catalog version | `UpdateChecker` |
+| `Catalog/` (Core) | source formats and the source list | `CatalogSource`, `CatalogApp`, `CatalogVersion`, `SourceParser`, `SourceStore` |
+| `Downloads/` (Core) | fetching IPAs | `DownloadManager`, `DownloadEvent` |
+| `Updates/` (Core) | installed version against catalog version, written against `InstalledRecord` (which `InstalledApp` adopts) so the iOS app can bring its own record type | `UpdateChecker`, `UpdateOffer` (EiderKit names `UpdateOffer<InstalledApp>` `AvailableUpdate`), `AppVersion`, `InstallOrigin` |
+| `Browse/` (Core) | the catalog flattened for search | `BrowseIndex`, `BrowseFilter`, `InstallStatus` |
 | `Diagnostics/` | why an installed app did not launch | `LaunchProbe`, `LaunchDiagnosis`, `LaunchClassifier` |
 
 ## Rules every module follows

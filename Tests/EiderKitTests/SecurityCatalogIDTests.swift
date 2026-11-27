@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// A source's id is accepted as text (CatalogIdentifier). These follow ids the

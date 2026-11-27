@@ -1,5 +1,6 @@
 import CryptoKit
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 final class DownloadsManagerTests: XCTestCase {

@@ -1,10 +1,24 @@
 import Foundation
 
-/// A newer version of an installed app that a source offers.
-public struct AvailableUpdate: Codable, Sendable, Equatable, Identifiable {
+/// What update matching reads of an installed app. The Mac library's
+/// `InstalledApp` carries Mac engine types (install options), so the matching
+/// is written against this instead, and the iOS app conforms its own record.
+public protocol InstalledRecord: Sendable {
+    var bundleID: String { get }
+    var name: String { get }
+    var version: String { get }
+    var build: String { get }
+    /// The source recorded by an install that predates `origin`.
+    var sourceURL: URL? { get }
+    var origin: InstallOrigin? { get }
+}
+
+/// A newer version of an installed app that a source offers. EiderKit names
+/// the Mac instance `AvailableUpdate`.
+public struct UpdateOffer<Installed: InstalledRecord>: Sendable, Identifiable {
     public var id: String { installed.bundleID }
 
-    public let installed: InstalledApp
+    public let installed: Installed
     /// The source the new version comes from.
     public let sourceURL: URL
     /// That source's name, for the Updates list and `eider list`.
@@ -14,7 +28,7 @@ public struct AvailableUpdate: Codable, Sendable, Equatable, Identifiable {
     public let app: CatalogApp
     public let version: CatalogVersion
 
-    public init(installed: InstalledApp, sourceURL: URL, sourceName: String = "", app: CatalogApp, version: CatalogVersion) {
+    public init(installed: Installed, sourceURL: URL, sourceName: String = "", app: CatalogApp, version: CatalogVersion) {
         self.installed = installed
         self.sourceURL = sourceURL
         self.sourceName = sourceName
@@ -25,6 +39,9 @@ public struct AvailableUpdate: Codable, Sendable, Equatable, Identifiable {
     /// Where an update installed from here comes from.
     public var origin: InstallOrigin { InstallOrigin(sourceURL: sourceURL, entryID: app.bundleID, entryName: app.name) }
 }
+
+extension UpdateOffer: Equatable where Installed: Equatable {}
+extension UpdateOffer: Codable where Installed: Codable {}
 
 /// Compares what is installed with what the sources offer. Pure: the caller
 /// passes both lists, so the CLI, the app and the tests all use one rule.
@@ -50,19 +67,19 @@ public enum UpdateChecker {
     /// update, so a known origin is never widened. The offer is the candidate
     /// version that ranks highest (`CatalogVersion.ranksAbove`), and only when it
     /// ranks above the installed version: a hash or a label never does.
-    public static func updates(installed: [InstalledApp], catalog: [SourcedApp]) -> [AvailableUpdate] {
+    public static func updates<Installed: InstalledRecord>(installed: [Installed], catalog: [SourcedApp]) -> [UpdateOffer<Installed>] {
         // One pass over the catalog, not one per installed app: a 17k-app source
         // times a full library was the cost. Grouping keeps catalog order per id.
         let index = Index(catalog)
         return installed.compactMap { update(for: $0, candidates: index.candidates(for: $0)) }
     }
 
-    public static func update(for app: InstalledApp, in catalog: [SourcedApp]) -> AvailableUpdate? {
+    public static func update<Installed: InstalledRecord>(for app: Installed, in catalog: [SourcedApp]) -> UpdateOffer<Installed>? {
         update(for: app, candidates: Index(catalog).candidates(for: app))
     }
 
     /// Whether any source lists the app at all, by origin or by bundle id.
-    public static func isListed(_ app: InstalledApp, in catalog: [SourcedApp]) -> Bool {
+    public static func isListed(_ app: some InstalledRecord, in catalog: [SourcedApp]) -> Bool {
         !Index(catalog).candidates(for: app).isEmpty
     }
 
@@ -81,7 +98,7 @@ public enum UpdateChecker {
             byEntry = Dictionary(grouping: catalog) { Key(sourceURL: $0.sourceURL, entryID: $0.app.bundleID) }
         }
 
-        func candidates(for app: InstalledApp) -> [SourcedApp] {
+        func candidates(for app: some InstalledRecord) -> [SourcedApp] {
             if let origin = app.origin {
                 let exact = pick(byEntry[Key(sourceURL: origin.sourceURL, entryID: origin.entryID)] ?? [], name: origin.entryName, installedName: app.name)
                 if !exact.isEmpty { return exact }
@@ -112,7 +129,7 @@ public enum UpdateChecker {
         }
     }
 
-    private static func update(for app: InstalledApp, candidates: [SourcedApp]) -> AvailableUpdate? {
+    private static func update<Installed: InstalledRecord>(for app: Installed, candidates: [SourcedApp]) -> UpdateOffer<Installed>? {
         var best: (sourced: SourcedApp, version: CatalogVersion)?
         for sourced in candidates {
             guard let newest = newestVersion(of: sourced.app) else { continue }
@@ -122,7 +139,7 @@ public enum UpdateChecker {
         guard let best, AppVersion.isNewer(version: best.version.version, build: best.version.build, than: app.version, build: app.build) else {
             return nil
         }
-        return AvailableUpdate(
+        return UpdateOffer(
             installed: app, sourceURL: best.sourced.sourceURL, sourceName: best.sourced.source.name,
             app: best.sourced.app, version: best.version)
     }

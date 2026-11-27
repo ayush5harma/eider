@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// The printable-ASCII shortcut in `DisplayText` must give exactly what the

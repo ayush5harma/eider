@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// A bundle id is not an app's identity in a tweak source: fastsign.dev lists 211

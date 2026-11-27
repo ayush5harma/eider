@@ -3,6 +3,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// Test images and a loader that counts, waits and fails on request.

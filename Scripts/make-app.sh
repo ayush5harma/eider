@@ -34,7 +34,7 @@ case "$CONFIGURATION" in release | debug) ;; *) usage ;; esac
 
 cd "$ROOT"
 
-VERSION="$(sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' Sources/EiderKit/Support/EiderVersion.swift)"
+VERSION="$(sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' Sources/EiderCore/Support/EiderVersion.swift)"
 [ -n "$VERSION" ] || { echo "error: cannot read version from EiderVersion.swift" >&2; exit 1; }
 
 # Shims are produced by another script (developer machine or CI); the build
