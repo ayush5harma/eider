@@ -7,6 +7,13 @@ extension CatalogSource {
     }
 }
 
+public struct SourceImportProgress: Equatable, Sendable {
+    public let done: Int
+    public let total: Int
+
+    public var label: String { "Importing \(done) of \(total)..." }
+}
+
 extension AppModel {
     public var selectedSource: CatalogSource? {
         selectedSourceURL.flatMap { url in sources.first { $0.url == url } }
@@ -37,6 +44,57 @@ extension AppModel {
             return false
         }
     }
+
+    // MARK: Import and export
+
+    /// Adds every new address in a list file or pasted text. Rides on
+    /// `isAddingSource`, so the Add button and spinner behave as for one source.
+    /// Nothing is fetched for an address already added, rejected by the URL
+    /// policy or repeated in the list; one source failing does not stop the rest.
+    public func importSources(from data: Data) async {
+        guard !isAddingSource else { return }
+        isAddingSource = true
+        sourceImportProgress = nil
+        defer {
+            isAddingSource = false
+            sourceImportProgress = nil
+        }
+        do {
+            let backend = self.backend
+            let result = try await SourceListIO.importList(
+                data, existing: sources.map(\.url),
+                add: { try await backend.addSource($0) },
+                onProgress: { done, total in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.isAddingSource, total > 0 else { return }
+                        self.sourceImportProgress = SourceImportProgress(done: done, total: total)
+                    }
+                })
+            await reload()
+            sourceImportResult = result
+        } catch {
+            report(error)
+        }
+    }
+
+    public func importSources(fromFile url: URL) async {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            await importSources(from: try SourceListIO.read(contentsOf: url))
+        } catch {
+            report(error)
+        }
+    }
+
+    /// The export file for a chosen name: plain text for ".txt", Eider JSON otherwise.
+    public func sourceListFile(named name: String) throws -> Data {
+        if name.lowercased().hasSuffix(".txt") { return Data(allSourceURLsText.utf8) }
+        return try SourceListIO.exportJSON(sources)
+    }
+
+    /// Every source address, one per line.
+    public var allSourceURLsText: String { SourceListIO.exportText(sources) }
 
     public func removeSource(_ source: CatalogSource) async {
         do {

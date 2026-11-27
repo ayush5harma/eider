@@ -53,6 +53,10 @@ public final class AppModel {
     public var selectedSourceURL: URL?
     public internal(set) var isRefreshing = false
     public internal(set) var isAddingSource = false
+    /// How far an import has got, while one runs; the Sources page shows it beside the spinner.
+    public internal(set) var sourceImportProgress: SourceImportProgress?
+    /// What the last import did, shown in a sheet until the person dismisses it.
+    public var sourceImportResult: SourceImportResult?
     /// Why a source's last refresh failed, by source address.
     public internal(set) var refreshFailures: [URL: String] = [:]
 
