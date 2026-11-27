@@ -11,6 +11,7 @@ public enum SigningError: Error, Equatable, Sendable, LocalizedError {
     case profileExpired(Date)
     case notAnApp(path: String)
     case bundleIdentifierNotAllowed(bundleIdentifier: String, profileName: String, allowed: String)
+    case invalidBundleIdentifier(String)
     case signingFailed(String)
 
     public var errorDescription: String? {
@@ -33,6 +34,8 @@ public enum SigningError: Error, Equatable, Sendable, LocalizedError {
             return "\(path) is not an app: it has no Info.plist naming a bundle identifier and an executable."
         case .bundleIdentifierNotAllowed(let bundleIdentifier, let profileName, let allowed):
             return "The provisioning profile \"\(profileName)\" only signs \(allowed), not \(bundleIdentifier). Change the bundle identifier or use a wildcard profile."
+        case .invalidBundleIdentifier(let identifier):
+            return "\"\(identifier)\" is not a bundle identifier: use letters, digits, hyphens and dots, such as com.example.app."
         case .signingFailed(let reason):
             return "Signing failed: \(reason)"
         }

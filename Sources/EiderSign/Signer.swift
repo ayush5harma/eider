@@ -40,6 +40,10 @@ actor ZsignEngine {
         if certificate.profileExpires <= now {
             throw SigningError.profileExpired(certificate.profileExpires)
         }
+        if let newIdentifier = options.bundleIdentifier, !newIdentifier.isEmpty,
+           !AppBundle.isValidBundleIdentifier(newIdentifier) {
+            throw SigningError.invalidBundleIdentifier(newIdentifier)
+        }
         let app = try AppBundle(url: appURL)
         for bundleIdentifier in app.finalBundleIdentifiers(renamingTo: options.bundleIdentifier)
         where !certificate.allows(bundleIdentifier: bundleIdentifier) {
@@ -48,10 +52,6 @@ actor ZsignEngine {
                 profileName: certificate.profileName,
                 allowed: certificate.allowedBundleIdentifiers)
         }
-        if options.removeURLSchemes {
-            try app.removeMainInfoKey("CFBundleURLTypes")
-        }
-
         // zsign reads the p12 and profile from files. They go to a private
         // folder (0700) and are removed whatever happens.
         let workspace = FileManager.default.temporaryDirectory
@@ -63,6 +63,10 @@ actor ZsignEngine {
         let profileURL = workspace.appendingPathComponent("embedded.mobileprovision")
         try certificate.p12Data.write(to: p12URL, options: .atomic)
         try certificate.profileData.write(to: profileURL, options: .atomic)
+        // Last change before zsign, so a failure above leaves the app as it was.
+        if options.removeURLSchemes {
+            try app.removeMainInfoKey("CFBundleURLTypes")
+        }
 
         var errorPointer: UnsafeMutablePointer<CChar>?
         defer { eider_string_free(errorPointer) }
@@ -140,6 +144,14 @@ struct AppBundle {
         return [newIdentifier] + nestedBundleIdentifiers.map {
             $0.replacingOccurrences(of: bundleIdentifier, with: newIdentifier)
         }
+    }
+
+    /// Letters, digits, hyphens and dots, with no empty component: what iOS
+    /// accepts in CFBundleIdentifier.
+    static func isValidBundleIdentifier(_ identifier: String) -> Bool {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+        let components = identifier.split(separator: ".", omittingEmptySubsequences: false)
+        return !components.contains { $0.isEmpty || !$0.allSatisfy(allowed.contains) }
     }
 
     func removeMainInfoKey(_ key: String) throws {

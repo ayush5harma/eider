@@ -130,6 +130,19 @@ final class SignerTests: XCTestCase {
         XCTAssertEqual(try signedEntitlements(app)["application-identifier"] as? String, "\(TestMaterial.team).\(ProbeApp.bundleIdentifier)")
     }
 
+    func testRefusesAnInvalidBundleIdentifierBeforeChangingAnything() async throws {
+        let app = try ProbeApp.build(in: material.directory)
+        let certificate = try certificate()
+        for bad in ["*", "com.example..app", "com.exa mple", "com.example."] {
+            await assertThrows(
+                try await Signer.sign(
+                    appAt: app, certificate: certificate,
+                    options: SigningOptions(bundleIdentifier: bad, removeURLSchemes: true)),
+                .invalidBundleIdentifier(bad))
+        }
+        XCTAssertNotNil(try ProbeApp.info(app)["CFBundleURLTypes"], "a refusal leaves Info.plist as it was")
+    }
+
     func testRefusesSomethingThatIsNotAnApp() async throws {
         let folder = material.url("Empty.app")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
