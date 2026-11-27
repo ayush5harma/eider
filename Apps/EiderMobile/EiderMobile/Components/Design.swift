@@ -12,9 +12,61 @@ extension View {
         }
     }
 
+    /// A neutral action beside a primary one, outside scrolling content.
+    @ViewBuilder func secondaryActionStyle() -> some View {
+        if #available(iOS 26, *) {
+            buttonStyle(.glass).buttonBorderShape(.capsule)
+        } else {
+            buttonStyle(.bordered).buttonBorderShape(.capsule)
+        }
+    }
+
     /// A button inside a row: plain bordered, never glass.
     func rowActionStyle() -> some View {
         buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
+    }
+
+    /// A floating control that is not a button (the add bar's text field):
+    /// interactive glass on 26, the bar material before it.
+    @ViewBuilder func floatingSurface() -> some View {
+        if #available(iOS 26, *) {
+            glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            background(.regularMaterial, in: Capsule())
+        }
+    }
+
+    /// Chrome pinned to the bottom of a screen: the system's scroll-edge bar
+    /// on 26 (it blurs what scrolls under it), a plain inset before it.
+    @ViewBuilder func bottomBar<Bar: View>(@ViewBuilder _ bar: () -> Bar) -> some View {
+        if #available(iOS 26, *) {
+            safeAreaBar(edge: .bottom) { bar() }
+        } else {
+            safeAreaInset(edge: .bottom) { bar().background(.bar) }
+        }
+    }
+
+    /// Clusters of glass controls merge as one shape on 26.
+    @ViewBuilder func glassCluster(spacing: CGFloat = 12) -> some View {
+        if #available(iOS 26, *) {
+            GlassEffectContainer(spacing: spacing) { self }
+        } else {
+            self
+        }
+    }
+}
+
+/// An app icon: the iOS icon's continuous corner (about 22.37 percent of the
+/// side), through the shared image pipeline.
+struct AppIcon: View {
+    let url: URL?
+    let sourceURL: URL?
+    let side: CGFloat
+    var name: String = ""
+
+    var body: some View {
+        RemoteImage(url: url, sourceURL: sourceURL, size: CGSize(width: side, height: side),
+                    corner: side * 0.2237, fallback: name)
     }
 }
 

@@ -82,8 +82,7 @@ private struct InstalledRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteImage(url: app.iconURL, sourceURL: app.origin?.sourceURL ?? app.sourceURL,
-                        size: CGSize(width: 48, height: 48), corner: 11, fallback: app.name)
+            AppIcon(url: app.iconURL, sourceURL: app.origin?.sourceURL ?? app.sourceURL, side: 48, name: app.name)
             VStack(alignment: .leading, spacing: 2) {
                 Text(app.name).font(.headline).lineLimit(1)
                 Text("\(app.version) \u{00B7} \(app.bundleID)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -99,7 +98,7 @@ private struct IPARow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteImage(url: ipa.iconURL, sourceURL: ipa.origin?.sourceURL, size: CGSize(width: 48, height: 48), corner: 11, fallback: ipa.name)
+            AppIcon(url: ipa.iconURL, sourceURL: ipa.origin?.sourceURL, side: 48, name: ipa.name)
             VStack(alignment: .leading, spacing: 2) {
                 Text(ipa.name).font(.headline).lineLimit(1)
                 Text([ipa.version, Format.size(ipa.size), "Added \(Format.date(ipa.addedAt))"].compactMap { $0 }.joined(separator: " \u{00B7} "))

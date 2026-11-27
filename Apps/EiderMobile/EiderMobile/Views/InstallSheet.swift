@@ -25,7 +25,7 @@ struct InstallSheet: View {
             Form {
                 Section {
                     HStack(spacing: 12) {
-                        RemoteImage(url: ipa.iconURL, sourceURL: ipa.origin?.sourceURL, size: CGSize(width: 56, height: 56), corner: 13, fallback: ipa.name)
+                        AppIcon(url: ipa.iconURL, sourceURL: ipa.origin?.sourceURL, side: 56, name: ipa.name)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(ipa.name).font(.headline)
                             Text([ipa.version, Format.size(ipa.size)].compactMap { $0 }.joined(separator: " \u{00B7} "))
@@ -99,13 +99,25 @@ struct InstallSheet: View {
                     Button(job.installed == nil ? "Cancel" : "Done") { dismiss() }
                         .disabled(job.isRunning)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    if job.isRunning {
-                        ProgressView()
-                    } else if job.installed == nil {
-                        Button(job.failure == nil ? "Install" : "Try Again") { start() }
-                            .disabled(selectedCertificate == nil)
+            }
+            // The one action of the sheet as a wide glass capsule in reach of a thumb.
+            .bottomBar {
+                if job.installed == nil {
+                    Button {
+                        start()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if job.isRunning { ProgressView().tint(.white) }
+                            Text(job.isRunning ? "Installing..." : job.failure == nil ? "Install" : "Try Again")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 30)
                     }
+                    .primaryActionStyle()
+                    .controlSize(.large)
+                    .disabled(selectedCertificate == nil || job.isRunning)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
             }
             .interactiveDismissDisabled(job.isRunning)

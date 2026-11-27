@@ -12,36 +12,6 @@ struct SourcesView: View {
         @Bindable var model = model
         NavigationStack {
             List {
-                Section {
-                    HStack(spacing: 8) {
-                        TextField("https://example.com/apps.json", text: $model.newSourceText)
-                            .textContentType(.URL)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.go)
-                            .onSubmit { Task { await model.addSourceFromText() } }
-                        PasteButton(payloadType: String.self) { strings in
-                            if let text = strings.first { model.newSourceText = text.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        }
-                        .labelStyle(.iconOnly)
-                        .buttonBorderShape(.capsule)
-                    }
-                    Button {
-                        Task { await model.addSourceFromText() }
-                    } label: {
-                        HStack {
-                            Text("Add Source")
-                            if model.isAddingSource { Spacer(); ProgressView() }
-                        }
-                    }
-                    .disabled(model.isAddingSource || model.newSourceText.trimmingCharacters(in: .whitespaces).isEmpty)
-                } header: {
-                    Text("Add a Source")
-                } footer: {
-                    Text("AltStore and PlayCover sources. Paste an https address.")
-                }
-
                 if let progress = model.importProgress {
                     Section {
                         ProgressView("Importing \(progress.done) of \(progress.total)...",
@@ -77,7 +47,7 @@ struct SourcesView: View {
                         if model.isRefreshing { Spacer(); ProgressView().controlSize(.small) }
                     }
                 } footer: {
-                    Text("Pull to refresh. Eider fetches sources older than six hours when it opens; a source that fails keeps its last copy.")
+                    Text("AltStore and PlayCover sources. Pull to refresh; Eider also fetches sources older than six hours when it opens; a source that fails keeps its last copy.")
                 }
             }
             .navigationTitle("Sources")
@@ -85,6 +55,8 @@ struct SourcesView: View {
                 SourceDetailView(sourceURL: url)
             }
             .refreshable { await model.refreshAllSources() }
+            .bottomBar { AddSourceBar() }
+            .modifier(RefreshItem(isRefreshing: model.isRefreshing) { Task { await model.refreshAllSources() } })
             .settingsToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -112,7 +84,7 @@ struct SourcesView: View {
                         }
                         .disabled(model.sources.isEmpty)
                     } label: {
-                        Label("Import and Export", systemImage: "ellipsis.circle")
+                        Label("Import and Export", systemImage: "ellipsis")
                     }
                     .disabled(model.isAddingSource)
                 }
@@ -137,13 +109,85 @@ struct SourcesView: View {
     }
 }
 
+/// The add field as floating glass chrome above the tab bar, so it stays in
+/// reach however long the list gets: field, Paste and Add merge as one cluster.
+private struct AddSourceBar: View {
+    @Environment(MobileModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        let empty = model.newSourceText.trimmingCharacters(in: .whitespaces).isEmpty
+        HStack(spacing: 10) {
+            TextField("Add a source: https://...", text: $model.newSourceText)
+                .textContentType(.URL)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .onSubmit { Task { await model.addSourceFromText() } }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .floatingSurface()
+            if empty {
+                PasteButton(payloadType: String.self) { strings in
+                    if let text = strings.first { model.newSourceText = text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.circle)
+            } else if model.isAddingSource {
+                ProgressView().frame(width: 44, height: 44)
+            } else {
+                Button {
+                    Task { await model.addSourceFromText() }
+                } label: {
+                    Image(systemName: "plus").font(.body.weight(.semibold)).frame(width: 22, height: 26)
+                }
+                .primaryActionStyle()
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("Add Source")
+            }
+        }
+        .glassCluster()
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+}
+
+/// Refresh beside the import menu, in its own glass group on 26
+/// (ToolbarSpacer), so the two do not read as one control.
+private struct RefreshItem: ViewModifier {
+    let isRefreshing: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.toolbar {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                ToolbarItem(placement: .topBarTrailing) { button }
+            }
+        } else {
+            content.toolbar {
+                ToolbarItem(placement: .topBarTrailing) { button }
+            }
+        }
+    }
+
+    @ViewBuilder private var button: some View {
+        if isRefreshing {
+            ProgressView()
+        } else {
+            Button(action: action) { Label("Refresh All", systemImage: "arrow.clockwise") }
+        }
+    }
+}
+
 private struct SourceRow: View {
     let source: CatalogSource
     let failure: String?
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteImage(url: source.iconURL, sourceURL: source.url, size: CGSize(width: 44, height: 44), fallback: source.name)
+            AppIcon(url: source.iconURL, sourceURL: source.url, side: 44, name: source.name)
             VStack(alignment: .leading, spacing: 3) {
                 Text(source.name).font(.headline).lineLimit(1)
                 let count = source.entryCount ?? source.apps.count
@@ -172,7 +216,7 @@ private struct SourceDetailView: View {
             List {
                 Section {
                     HStack(spacing: 14) {
-                        RemoteImage(url: source.iconURL, sourceURL: source.url, size: CGSize(width: 64, height: 64), corner: 14, fallback: source.name)
+                        AppIcon(url: source.iconURL, sourceURL: source.url, side: 64, name: source.name)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(source.name).font(.title2.bold())
                             if let subtitle = source.subtitle { Text(subtitle).foregroundStyle(.secondary) }

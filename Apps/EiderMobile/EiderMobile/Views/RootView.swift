@@ -36,16 +36,10 @@ struct RootView: View {
 
     @ViewBuilder private var tabs: some View {
         @Bindable var model = model
-        if #available(iOS 18, *) {
-            TabView(selection: $model.tab) {
-                Tab("Browse", systemImage: "square.grid.2x2", value: AppTab.browse) { BrowseView() }
-                Tab("Library", systemImage: "books.vertical", value: AppTab.library) { LibraryView() }
-                Tab("Updates", systemImage: "arrow.down.circle", value: AppTab.updates) { UpdatesView() }
-                    .badge(model.updates.count)
-                Tab("Sources", systemImage: "tray.2", value: AppTab.sources) { SourcesView() }
-                Tab("Certificates", systemImage: "checkmark.seal", value: AppTab.certificates) { CertificatesView() }
-            }
-            .tabViewStyle(.sidebarAdaptable)
+        if #available(iOS 26, *) {
+            modernTabs.tabBarMinimizeBehavior(.onScrollDown)
+        } else if #available(iOS 18, *) {
+            modernTabs
         } else {
             TabView(selection: $model.tab) {
                 BrowseView().tabItem { Label("Browse", systemImage: "square.grid.2x2") }.tag(AppTab.browse)
@@ -56,6 +50,22 @@ struct RootView: View {
                 CertificatesView().tabItem { Label("Certificates", systemImage: "checkmark.seal") }.tag(AppTab.certificates)
             }
         }
+    }
+
+    /// Browse is the search-role tab: on iOS 26 it floats beside the glass tab
+    /// bar and its search field takes the bar's place, as in the system apps.
+    @available(iOS 18, *)
+    private var modernTabs: some View {
+        @Bindable var model = model
+        return TabView(selection: $model.tab) {
+            Tab("Library", systemImage: "books.vertical", value: AppTab.library) { LibraryView() }
+            Tab("Updates", systemImage: "arrow.down.circle", value: AppTab.updates) { UpdatesView() }
+                .badge(model.updates.count)
+            Tab("Sources", systemImage: "tray.2", value: AppTab.sources) { SourcesView() }
+            Tab("Certificates", systemImage: "checkmark.seal", value: AppTab.certificates) { CertificatesView() }
+            Tab("Browse", systemImage: "magnifyingglass", value: AppTab.browse, role: .search) { BrowseView() }
+        }
+        .tabViewStyle(.sidebarAdaptable)
     }
 
     private var linkTitle: String {

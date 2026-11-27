@@ -76,7 +76,7 @@ private struct CertificateRow: View {
             HStack(spacing: 6) {
                 Pill(text: certificate.profile.kind.label, tint: .purple)
                 RevocationPill(state: revocation)
-                ExpiryText(certificate: certificate).font(.caption)
+                ExpiryPill(certificate: certificate)
             }
         }
         .padding(.vertical, 2)
@@ -93,6 +93,18 @@ struct RevocationPill: View {
         case .revoked: Pill(text: "Revoked", systemImage: "xmark.shield", tint: .red)
         case .unavailable: Pill(text: "Not Checked", systemImage: "exclamationmark.shield", tint: .orange)
         }
+    }
+}
+
+struct ExpiryPill: View {
+    let certificate: CertificateRecord
+
+    var body: some View {
+        let expires = certificate.profile.expires
+        let soon = certificate.expires(within: MobileModel.expiryWarning)
+        Pill(text: expires < Date() ? "Expired" : "Expires \(Format.date(expires))",
+             systemImage: soon ? "exclamationmark.triangle.fill" : "calendar",
+             tint: soon ? .red : .secondary)
     }
 }
 

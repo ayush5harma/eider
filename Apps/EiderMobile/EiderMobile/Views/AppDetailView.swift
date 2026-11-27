@@ -54,7 +54,7 @@ private struct Detail: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
-            RemoteImage(url: app.iconURL, sourceURL: entry.sourceURL, size: CGSize(width: 104, height: 104), corner: 23, fallback: app.name)
+            AppIcon(url: app.iconURL, sourceURL: entry.sourceURL, side: 104, name: app.name)
             VStack(alignment: .leading, spacing: 6) {
                 Text(app.name).font(.title2.bold()).lineLimit(2)
                 Text(app.developerName ?? entry.source.name).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

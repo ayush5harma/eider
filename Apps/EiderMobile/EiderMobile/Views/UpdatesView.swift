@@ -30,6 +30,7 @@ struct UpdatesView: View {
                         ProgressView()
                     } else {
                         Button("Update All") { Task { await model.updateAll() } }
+                            .primaryActionStyle()
                             .disabled(model.updates.isEmpty)
                     }
                 }
@@ -45,7 +46,7 @@ private struct UpdateRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                RemoteImage(url: offer.app.iconURL, sourceURL: offer.sourceURL, size: CGSize(width: 52, height: 52), corner: 12, fallback: offer.app.name)
+                AppIcon(url: offer.app.iconURL, sourceURL: offer.sourceURL, side: 52, name: offer.app.name)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(offer.installed.name).font(.headline).lineLimit(1)
                     Text("\(offer.installed.version) \u{2192} \(offer.version.version)")

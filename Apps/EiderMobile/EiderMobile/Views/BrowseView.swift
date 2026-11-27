@@ -32,7 +32,7 @@ struct BrowseView: View {
                             AppRow(entry: entry)
                         }
                     }
-                    .listStyle(.plain)
+                    .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle("Browse")
@@ -53,8 +53,7 @@ struct BrowseView: View {
                         }
                     } label: {
                         Label("Filter by Source",
-                              systemImage: model.filter.source == nil
-                                  ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                              systemImage: "line.3.horizontal.decrease")
                     }
                     .disabled(model.sources.isEmpty)
                 }
@@ -71,7 +70,7 @@ struct AppRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteImage(url: entry.app.iconURL, sourceURL: entry.sourceURL, size: CGSize(width: 52, height: 52), corner: 12, fallback: entry.app.name)
+            AppIcon(url: entry.app.iconURL, sourceURL: entry.sourceURL, side: 52, name: entry.app.name)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.app.name).font(.headline).lineLimit(1)
                 Text(entry.app.subtitle ?? entry.app.developerName ?? entry.source.name)
