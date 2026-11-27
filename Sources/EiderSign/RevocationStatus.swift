@@ -13,6 +13,11 @@ public enum RevocationStatus: Sendable, Equatable {
 extension SigningCertificate {
     /// Asks the OCSP responder named in the certificate. Network-bound and
     /// asynchronous; it never blocks the caller's actor.
+    ///
+    /// Apple's responders are plain HTTP (http://ocsp.apple.com/...), so on
+    /// iOS the app's Info.plist needs an App Transport Security exception
+    /// for ocsp.apple.com (NSExceptionAllowsInsecureHTTPLoads); without it
+    /// this returns `.unknown`. The response is signature-checked either way.
     public func revocationStatus() async -> RevocationStatus {
         await revocationStatus { url, request in
             var urlRequest = URLRequest(url: url, timeoutInterval: 15)

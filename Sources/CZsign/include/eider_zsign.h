@@ -32,9 +32,11 @@ typedef enum {
 
 /// Opens a PKCS#12 with OpenSSL, the same parser zsign signs with, so a file
 /// that passes here also signs. On EIDER_P12_OK, leaf_der holds the
-/// certificate paired with the private key and issuer_der its issuer, taken
-/// from the p12's own chain or from the Apple WWDR intermediates zsign
-/// carries; issuer_der is empty when neither has it.
+/// certificate paired with the private key and issuer_der its issuer: the
+/// Apple WWDR intermediate zsign carries, else a certificate from the p12's
+/// own chain, in both cases only one whose key verifies the leaf's
+/// signature; issuer_der is empty when there is none. A p12 without a MAC
+/// that fails to decrypt is reported as a wrong password.
 eider_p12_status eider_p12_read(const uint8_t *p12, size_t p12_length,
                                 const char *password,
                                 eider_bytes *leaf_der, eider_bytes *issuer_der);

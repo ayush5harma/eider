@@ -30,22 +30,33 @@ final class TestMaterial {
 
     /// A leaf issued by the test CA; returns its DER.
     @discardableResult
-    func makeLeaf(_ name: String, commonName: String = "Apple Development: Eider Test (\(TestMaterial.team))") throws -> Data {
+    func makeLeaf(
+        _ name: String,
+        commonName: String = "Apple Development: Eider Test (\(TestMaterial.team))",
+        extensions: String = "leaf"
+    ) throws -> Data {
         let subject = "/UID=\(Self.team)/CN=\(commonName)/OU=\(Self.team)/O=Eider Test Team/C=US"
         try openssl("req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", "\(name).key", "-out", "\(name).csr",
                     "-config", "request.cnf", "-subj", subject)
         try openssl("x509", "-req", "-in", "\(name).csr", "-CA", "ca.crt", "-CAkey", "ca.key",
                     "-set_serial", String(UInt32.random(in: 1_000...UInt32.max)), "-days", "30",
-                    "-out", "\(name).crt", "-extfile", "openssl.cnf", "-extensions", "leaf")
+                    "-out", "\(name).crt", "-extfile", "openssl.cnf", "-extensions", extensions)
         try openssl("x509", "-in", "\(name).crt", "-outform", "DER", "-out", "\(name).der")
         return try Data(contentsOf: url("\(name).der"))
     }
 
     /// The leaf and its key, with the CA in the chain, as zsign needs to find
     /// the issuer of a non-Apple certificate.
-    func makeP12(_ name: String, password: String = TestMaterial.password) throws -> Data {
-        try openssl("pkcs12", "-export", "-inkey", "\(name).key", "-in", "\(name).crt", "-certfile", "ca.crt",
-                    "-name", "Eider Test", "-passout", "pass:\(password)", "-out", "\(name).p12")
+    func makeP12(
+        _ name: String,
+        password: String = TestMaterial.password,
+        chain: String = "ca.crt",
+        mac: Bool = true
+    ) throws -> Data {
+        try run("/usr/bin/openssl", [
+            "pkcs12", "-export", "-inkey", "\(name).key", "-in", "\(name).crt", "-certfile", chain,
+            "-name", "Eider Test", "-passout", "pass:\(password)", "-out", "\(name).p12",
+        ] + (mac ? [] : ["-nomac"]))
         return try Data(contentsOf: url("\(name).p12"))
     }
 
@@ -163,6 +174,11 @@ final class TestMaterial {
     basicConstraints = critical,CA:TRUE
     keyUsage = critical,keyCertSign,cRLSign,digitalSignature
     subjectKeyIdentifier = hash
+
+    [responder]
+    basicConstraints = critical,CA:FALSE
+    keyUsage = critical,digitalSignature
+    extendedKeyUsage = OCSPSigning
 
     [leaf]
     basicConstraints = critical,CA:FALSE

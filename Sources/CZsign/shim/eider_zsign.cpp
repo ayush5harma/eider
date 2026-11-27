@@ -18,6 +18,12 @@
 
 namespace {
 
+// Five minutes of clock skew either way. A response older than a week is
+// refused even without nextUpdate: the request has no nonce, so over plain
+// HTTP an old "good" could otherwise be replayed after a revocation.
+const long kClockSkewSeconds = 300;
+const long kMaxResponseAgeSeconds = 7 * 24 * 3600;
+
 // OpenSSL 3 stops loading the default provider by itself once any provider
 // is loaded explicitly, and Keychain-exported p12s may use RC2-40, which
 // lives in the legacy provider. Load both, once.
@@ -94,27 +100,33 @@ X509* ReadPEM(const char* pem)
 	return cert;
 }
 
-// The p12's own chain first; otherwise the WWDR intermediate zsign would
-// embed in the signature for this leaf.
+// True only when candidate's key really signed leaf: X509_check_issued
+// compares names and key ids, which a crafted p12 chain can copy.
+bool Issued(X509* candidate, X509* leaf)
+{
+	EVP_PKEY* key = X509_get0_pubkey(candidate);
+	return X509_V_OK == X509_check_issued(candidate, leaf) && NULL != key && 1 == X509_verify(leaf, key);
+}
+
+// The issuer is the only OCSP trust anchor, so it must have signed the leaf.
+// zsign's Apple WWDR intermediates first, then the p12's own chain (needed
+// for any non-Apple CA, such as the one the tests make).
 X509* FindIssuer(X509* leaf, STACK_OF(X509)* chain)
 {
+	const char* pem = ZSignAsset::WWDRIntermediatePEM(X509_issuer_name_hash(leaf));
+	X509* wwdr = (NULL != pem) ? ReadPEM(pem) : NULL;
+	if (NULL != wwdr && Issued(wwdr, leaf)) {
+		return wwdr;
+	}
+	X509_free(wwdr);
 	for (int i = 0; NULL != chain && i < sk_X509_num(chain); i++) {
 		X509* candidate = sk_X509_value(chain, i);
-		if (X509_V_OK == X509_check_issued(candidate, leaf)) {
+		if (Issued(candidate, leaf)) {
 			X509_up_ref(candidate);
 			return candidate;
 		}
 	}
-	const char* pem = ZSignAsset::WWDRIntermediatePEM(X509_issuer_name_hash(leaf));
-	if (NULL == pem) {
-		return NULL;
-	}
-	X509* wwdr = ReadPEM(pem);
-	if (NULL != wwdr && X509_V_OK != X509_check_issued(wwdr, leaf)) {
-		X509_free(wwdr);
-		return NULL;
-	}
-	return wwdr;
+	return NULL;
 }
 
 bool ErrorQueueHasMACFailure()
@@ -177,10 +189,12 @@ eider_p12_status eider_p12_read(const uint8_t* p12, size_t p12_length,
 	EVP_PKEY* key = NULL;
 	X509* leaf = NULL;
 	STACK_OF(X509)* chain = NULL;
+	// Without a MAC, a wrong password only shows as a decryption failure.
+	bool hasMAC = (1 == PKCS12_mac_present(container));
 	int parsed = PKCS12_parse(container, NULL == password ? "" : password, &key, &leaf, &chain);
 	PKCS12_free(container);
 	if (!parsed) {
-		bool wrongPassword = ErrorQueueHasMACFailure();
+		bool wrongPassword = ErrorQueueHasMACFailure() || !hasMAC;
 		return wrongPassword ? EIDER_P12_WRONG_PASSWORD : EIDER_P12_MALFORMED;
 	}
 
@@ -317,7 +331,7 @@ eider_ocsp_status eider_ocsp_check(const uint8_t* response_bytes, size_t respons
 			reason = "The OCSP response is not signed by the certificate's issuer.";
 		} else if (1 != OCSP_resp_find_status(basic, identifier, &certStatus, &revocationReason, &revokedTime, &thisUpdate, &nextUpdate)) {
 			reason = "The OCSP response does not mention this certificate.";
-		} else if (1 != OCSP_check_validity(thisUpdate, nextUpdate, 300, -1)) {
+		} else if (1 != OCSP_check_validity(thisUpdate, nextUpdate, kClockSkewSeconds, kMaxResponseAgeSeconds)) {
 			reason = "The OCSP response is out of date.";
 		} else if (V_OCSP_CERTSTATUS_GOOD == certStatus) {
 			status = EIDER_OCSP_GOOD;
@@ -349,9 +363,9 @@ int eider_sign_app(const eider_sign_request* request, char** error)
 	ZLog::SetLogLever(ZLog::E_NONE);
 	ZLog::ClearLastError();
 
-	// SHA-1 plus SHA-256 CodeDirectories (bSHA256Only = false): what Xcode
-	// writes for an iOS 17 deployment target, and what codesign -dvvv shows
-	// as "Hash choices=sha1,sha256".
+	// SHA-1 plus SHA-256 CodeDirectories (bSHA256Only = false, zsign's
+	// --legacy_sha1), which codesign -dvvv shows as "Hash choices=sha1,sha256".
+	// iOS accepts either; the dual form is what EiderSign was asked to emit.
 	ZSignAsset asset;
 	bool signedOK = asset.Init("", request->p12_path, request->profile_path, "",
 							   NULL == request->password ? "" : request->password,

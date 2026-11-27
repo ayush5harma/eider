@@ -88,6 +88,17 @@ final class SigningCertificateTests: XCTestCase {
         }
     }
 
+    func testRefusesAWrongPasswordForAP12WithoutAMAC() throws {
+        let material = try TestMaterial()
+        let leaf = try material.makeLeaf("leaf")
+        let p12 = try material.makeP12("leaf", mac: false)
+        let profile = try material.makeProfile(certificates: [leaf])
+        XCTAssertThrowsError(try SigningCertificate(p12: p12, password: "wrong", provisioningProfile: profile)) {
+            XCTAssertEqual($0 as? SigningError, .wrongPassword)
+        }
+        XCTAssertNoThrow(try SigningCertificate(p12: p12, password: TestMaterial.password, provisioningProfile: profile))
+    }
+
     func testRefusesAProfileMadeForAnotherCertificate() throws {
         let material = try TestMaterial()
         try material.makeLeaf("mine")
