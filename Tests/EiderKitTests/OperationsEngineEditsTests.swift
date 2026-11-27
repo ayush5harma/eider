@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// The three small edits made to modules owned elsewhere: reset-on-install,

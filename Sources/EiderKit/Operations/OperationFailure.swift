@@ -75,3 +75,18 @@ public struct OperationFailure: Error, Sendable, Equatable, LocalizedError, Cust
             message: "Eider only downloads over https (or http on this Mac), so it refused \(url.absoluteString).")
     }
 }
+
+extension OperationFailure: CodedFailure {
+    public var failureCode: String { code }
+    public var failureMessage: String { message }
+}
+
+extension InstallFailure: CodedFailure {
+    public var failureCode: String { "install.\(code.rawValue)" }
+    public var failureMessage: String { message }
+}
+
+extension UninstallFailure: CodedFailure {
+    public var failureCode: String { "uninstall.failed" }
+    public var failureMessage: String { message }
+}

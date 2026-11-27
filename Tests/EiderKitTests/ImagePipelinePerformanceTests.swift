@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// What a Browse row pays for its icon. The row's own body only ever does the

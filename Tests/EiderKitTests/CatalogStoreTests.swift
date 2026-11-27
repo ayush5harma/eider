@@ -1,4 +1,5 @@
 import XCTest
+@testable import EiderCore
 @testable import EiderKit
 
 /// Fetch double: a table of canned documents and failures, with call counts.

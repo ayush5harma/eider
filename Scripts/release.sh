@@ -20,7 +20,7 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-SOURCE_VERSION="$(sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' Sources/EiderKit/Support/EiderVersion.swift)"
+SOURCE_VERSION="$(sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' Sources/EiderCore/Support/EiderVersion.swift)"
 if [ "$VERSION" != "$SOURCE_VERSION" ]; then
   echo "error: $VERSION does not match EiderVersion.swift ($SOURCE_VERSION)" >&2
   exit 1
