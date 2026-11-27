@@ -3,17 +3,43 @@ import PackageDescription
 
 let package = Package(
     name: "Eider",
-    platforms: [.macOS(.v14)],
+    // iOS is for the on-device app (docs/IOS.md); only EiderCore, EiderSign and
+    // EiderInstall are built for it. EiderKit, the CLI and the Mac app stay macOS-only.
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
+        .library(name: "EiderCore", targets: ["EiderCore"]),
+        .library(name: "EiderSign", targets: ["EiderSign"]),
+        .library(name: "EiderInstall", targets: ["EiderInstall"]),
         .library(name: "EiderKit", targets: ["EiderKit"]),
         .executable(name: "eider", targets: ["eider"]),
         .executable(name: "EiderApp", targets: ["EiderApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.5.0"),
+        .package(url: "https://github.com/krzyzanowskim/OpenSSL.git", from: "3.3.3001"),
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.19"),
     ],
     targets: [
-        .target(name: "EiderKit"),
+        // Platform-neutral: sources, catalogs, downloads, update matching.
+        .target(name: "EiderCore"),
+        // On-device code signing with the user's own certificate.
+        .target(
+            name: "EiderSign",
+            dependencies: [
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "OpenSSL", package: "OpenSSL"),
+            ]
+        ),
+        // Unpack, repack and install IPAs on the device the app runs on.
+        .target(
+            name: "EiderInstall",
+            dependencies: [
+                "EiderSign",
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+            ]
+        ),
+        .target(name: "EiderKit", dependencies: ["EiderCore"]),
         .executableTarget(
             name: "eider",
             dependencies: [
@@ -24,5 +50,7 @@ let package = Package(
         .executableTarget(name: "EiderApp", dependencies: ["EiderKit"]),
         .testTarget(name: "EiderKitTests", dependencies: ["EiderKit"], exclude: ["Fixtures"]),
         .testTarget(name: "EiderCLITests", dependencies: ["eider", "EiderKit"]),
+        .testTarget(name: "EiderSignTests", dependencies: ["EiderSign"]),
+        .testTarget(name: "EiderInstallTests", dependencies: ["EiderInstall"]),
     ]
 )
