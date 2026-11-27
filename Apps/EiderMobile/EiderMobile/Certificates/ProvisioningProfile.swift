@@ -14,10 +14,11 @@ enum CertificateKind: String, Codable, Sendable {
     }
 }
 
-/// What a .mobileprovision says, read without EiderSign: the file is a CMS
-/// envelope around a plain XML property list, so the plist is taken from
-/// between `<?xml` and `</plist>` and the signature is not checked here
-/// (signing checks the pair as a whole).
+/// What a .mobileprovision says, read in the app so the Add sheet can show
+/// the team, type and expiry as soon as the file is picked, before a password
+/// is typed. The file is a CMS envelope around a plain XML property list, so
+/// the plist is taken from between `<?xml` and `</plist>`; EiderSign checks
+/// the signature and the pair as a whole when the certificate is added.
 struct ProvisioningProfile: Codable, Hashable, Sendable {
     let name: String
     let uuid: String
@@ -34,8 +35,6 @@ struct ProvisioningProfile: Codable, Hashable, Sendable {
     /// Common names of the certificates the profile allows, in its order.
     let certificateNames: [String]
     let entitlementKeys: [String]
-    /// DER of each allowed certificate, to check a .p12 against this profile.
-    let allowedCertificates: [Data]
 
     var isWildcard: Bool { appIDPattern.hasSuffix("*") }
 
@@ -77,8 +76,7 @@ struct ProvisioningProfile: Codable, Hashable, Sendable {
             expires: expires, kind: kind,
             provisionedDevices: devices, provisionsAllDevices: allDevices,
             certificateNames: certificates.compactMap(Self.commonName),
-            entitlementKeys: entitlements.keys.sorted(),
-            allowedCertificates: certificates)
+            entitlementKeys: entitlements.keys.sorted())
     }
 
     static func commonName(ofCertificate der: Data) -> String? {
@@ -89,9 +87,6 @@ struct ProvisioningProfile: Codable, Hashable, Sendable {
 
 enum CertificateError: LocalizedError {
     case unreadableProfile
-    case wrongPassword
-    case notInProfile
-    case unreadableCertificate
     case missingFiles
     case keychain(OSStatus)
 
@@ -99,12 +94,6 @@ enum CertificateError: LocalizedError {
         switch self {
         case .unreadableProfile:
             "That file is not a provisioning profile Eider can read. Choose the .mobileprovision that came with the certificate."
-        case .wrongPassword:
-            "The password does not open this .p12 file."
-        case .notInProfile:
-            "This certificate is not one the provisioning profile allows. Choose the profile made for this certificate."
-        case .unreadableCertificate:
-            "That file is not a .p12 certificate Eider can read."
         case .missingFiles:
             "This certificate's files are missing. Remove it and add it again."
         case .keychain(let status):

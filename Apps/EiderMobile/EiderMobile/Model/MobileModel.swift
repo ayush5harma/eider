@@ -77,7 +77,12 @@ final class MobileModel {
     // Certificates
     var certificates: [CertificateRecord] = []
     var defaultCertificateID: UUID?
+    /// Asked once per certificate per session: OCSP is a network round trip.
     var revocation: [UUID: RevocationState] = [:]
+
+    // Installing on this device
+    var installReadiness: InstallReadiness?
+    var isCheckingReadiness = false
 
     init(
         paths: EiderPaths = EiderPaths(),
@@ -88,7 +93,7 @@ final class MobileModel {
         self.sourceStore = SourceStore(paths: paths)
         self.downloads = DownloadManager(paths: paths)
         self.library = LibraryStore(paths: paths)
-        self.certificateStore = CertificateStore(paths: paths)
+        self.certificateStore = CertificateStore(paths: paths, signer: signer)
         self.signer = signer
         self.installer = installer
     }
@@ -103,6 +108,7 @@ final class MobileModel {
         await reloadCatalog()
         await reloadLibrary()
         await reloadCertificates()
+        await checkInstallReadiness()
         await refreshStaleSources()
     }
 

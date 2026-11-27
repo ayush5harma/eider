@@ -88,7 +88,8 @@ struct RevocationPill: View {
 
     var body: some View {
         switch state {
-        case .unknown: Pill(text: "Status Unknown", systemImage: "questionmark.circle")
+        case .unknown: Pill(text: "Status Unknown", systemImage: "questionmark")
+        case .checking: Pill(text: "Checking", systemImage: "ellipsis")
         case .valid: Pill(text: "Valid", systemImage: "checkmark.shield", tint: .green)
         case .revoked: Pill(text: "Revoked", systemImage: "xmark.shield", tint: .red)
         case .unavailable: Pill(text: "Not Checked", systemImage: "exclamationmark.shield", tint: .orange)
@@ -100,7 +101,7 @@ struct ExpiryPill: View {
     let certificate: CertificateRecord
 
     var body: some View {
-        let expires = certificate.profile.expires
+        let expires = certificate.expires
         let soon = certificate.expires(within: MobileModel.expiryWarning)
         Pill(text: expires < Date() ? "Expired" : "Expires \(Format.date(expires))",
              systemImage: soon ? "exclamationmark.triangle.fill" : "calendar",
@@ -113,7 +114,7 @@ struct ExpiryText: View {
     let certificate: CertificateRecord
 
     var body: some View {
-        let expires = certificate.profile.expires
+        let expires = certificate.expires
         let expired = expires < Date()
         Text(expired ? "Expired \(Format.date(expires))" : "Expires \(Format.date(expires))")
             .foregroundStyle(certificate.expires(within: MobileModel.expiryWarning) ? .red : .secondary)
@@ -129,10 +130,18 @@ private struct CertificateDetailView: View {
             let profile = certificate.profile
             List {
                 Section("Certificate") {
-                    LabeledContent("Name", value: certificate.commonName ?? profile.certificateNames.first ?? "Unknown")
+                    LabeledContent("Name", value: certificate.commonName)
                     if let nickname = certificate.nickname { LabeledContent("Nickname", value: nickname) }
                     LabeledContent("Status") { RevocationPill(state: model.revocation[id] ?? .unknown) }
-                    LabeledContent("Password", value: certificate.passwordChecked ? "Checked" : "Checked when signing")
+                    switch model.revocation[id] {
+                    case .unavailable(let reason)?:
+                        Text(reason).font(.footnote).foregroundStyle(.secondary)
+                    case .revoked(let date?)?:
+                        Text("Revoked \(Format.date(date)). Apps signed with it will not open.").font(.footnote).foregroundStyle(.red)
+                    default:
+                        EmptyView()
+                    }
+                    LabeledContent("Certificate Expires", value: Format.date(certificate.certificateExpires))
                 }
                 Section("Provisioning Profile") {
                     LabeledContent("Name", value: profile.name)

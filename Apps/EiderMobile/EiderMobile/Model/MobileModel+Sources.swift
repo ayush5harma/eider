@@ -99,8 +99,8 @@ extension MobileModel {
             let result = try await SourceListIO.importList(
                 data, existing: sources.map(\.url),
                 add: { try await store.add(url: $0) },
-                onProgress: { done, total in
-                    Task { @MainActor [weak self] in
+                onProgress: { [weak self] done, total in
+                    Task { @MainActor in
                         guard let self, self.isAddingSource, total > 0 else { return }
                         self.importProgress = (done, total)
                     }
