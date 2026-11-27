@@ -44,16 +44,22 @@ What we know as of 2026-11-28 (iOS 27.3 on the test iPhone):
 - Feather's fully local mode served the manifest from the device over HTTPS. It used a public wildcard certificate for a domain that resolves to 127.0.0.1 (backloop.dev). That certificate was revoked for key compromise, because its private key was published, and the service closed on 2026-09-04. **Eider does not ship or download anyone's published private key.**
 - Feather's semi-local mode depends on a third-party manifest service, and its pairing-file mode needs a computer-made pairing file plus a VPN app. Both have open bug reports on iOS 27.
 
-Eider's method, pending a test on the device:
+**Proved on 2026-11-28** on the iPhone 17 Pro, iOS 27.3: an itms-services install succeeds when the HTTPS server's certificate chains to a root the user installed as a profile and turned on in Certificate Trust Settings, even with that root name-constrained (critical nameConstraints permitting only an IP /32, `127.0.0.1/32` and `DNS:localhost`). The phone fetched the manifest, then HEAD and GET of the IPA over that HTTPS, and the app installed.
 
-1. On first use, Eider creates its own root certificate on the device. Its private key never leaves the Keychain. The root is name-constrained to `127.0.0.1` and `localhost`, so even a leaked key could not vouch for any other site.
-2. The user installs that root as a profile and turns on full trust once, in Settings > General > About > Certificate Trust Settings.
-3. To install an app, Eider:
-   - serves the signed IPA and its manifest from `https://127.0.0.1:<port>`, with a leaf certificate issued by that root;
-   - opens the itms-services link;
-   - keeps the server alive until iOS has fetched the IPA.
+One trap: OpenSSL treats a leaf whose subject CN looks like a host or IP as a DNS name and fails the name constraints ("permitted subtree violation"). The leaf's CN is therefore "Eider local server", and the names go only in subjectAltName.
 
-If the device test shows that iOS will not accept a user-trusted root for itms-services, the fallback is decided then and recorded here.
+Eider's method, built in `EiderInstall`:
+
+1. **Root.** On first use `LocalRootAuthority` creates a P-256 key in the Keychain (this device only, never exported) and a self-signed root, subject "Eider Local Install (<8 hex chars>)": CA:TRUE pathlen 0 critical, keyUsage keyCertSign + cRLSign, critical nameConstraints permitting only IP `127.0.0.1/32` and DNS `localhost`. Even a leaked key could not vouch for any other site.
+2. **Trust, once.** `LocalInstaller.openProfileInstall()` serves the root as an unsigned `.mobileconfig` (`com.apple.security.root`, display name "Eider Local Install") from a plain-HTTP loopback listener at `http://127.0.0.1:<port>/root.mobileconfig`, since Safari must fetch it before the root is trusted. The user installs the profile and turns on full trust in Settings > General > About > Certificate Trust Settings. `status()` reports `.notSetUp`, `.needsTrust` or `.ready`; `.ready` means a URLSession with the default system trust (no delegate) reached the app's own loopback HTTPS server.
+3. **Server certificate.** A leaf issued by the root: CN "Eider local server", SAN IP `127.0.0.1` and DNS `localhost`, EKU serverAuth, 300 days (iOS refuses more than 825 for a user-trusted root), re-issued when under 30 days remain or the root changed. It and its key sit in the Keychain and are used as a `SecIdentity` by Network.framework TLS.
+4. **Install.** `LocalInstaller.install(ipa:bundleID:version:title:)`:
+   - serves `/<token>/manifest.plist` and `/<token>/app.ipa` (GET, HEAD, single byte ranges) from an `NWListener` bound to 127.0.0.1 only, on a random port, with a random 128-bit token per install; anything else is a 404;
+   - opens `itms-services://?action=download-manifest&url=<percent-encoded https://127.0.0.1:<port>/<token>/manifest.plist>`;
+   - keeps the app alive with a background task, reports progress, and reports "handed to iOS" once every byte of the IPA was served; the server stops 10 s later, or after 15 minutes without that.
+5. **Signing in between.** `LocalInstaller.prepareSignedIPA(from:sign:)` unpacks the IPA, calls the signer on `Payload/<name>.app` and repacks it uncompressed, keeping permissions and symlinks. Entries with absolute paths, `..` or symlinks out of the work directory are refused. A 99.8 MB IPA packed in 0.39 s and unpacked in 0.5 s on the Mac (debug build, 2026-11-28; `EIDER_TIMING=1 swift test --filter IPAArchiveTimingTests`); the device is not measured yet.
+
+The parts are tested on the Mac (`swift test --filter EiderInstall`); the whole flow inside the app on the device is still to be run after integration.
 
 ## Testing
 

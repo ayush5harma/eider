@@ -47,6 +47,7 @@ let package = Package(
             name: "EiderInstall",
             dependencies: [
                 "EiderSign",
+                .product(name: "X509", package: "swift-certificates"),
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ]
         ),
