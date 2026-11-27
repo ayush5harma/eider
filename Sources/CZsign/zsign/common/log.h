@@ -30,8 +30,13 @@ public:
 	static void Print(int nLevel, const char* szLog);
 	static void PrintV(int nLevel, const char* szFormat, ...);
 	static void SetLogLever(int nLogLevel) { g_nLogLevel = nLogLevel; }
+	// Eider: the last error message, kept even when printing is off, so the
+	// library caller can show why signing failed.
+	static const string& LastError() { return g_strLastError; }
+	static void ClearLastError() { g_strLastError.clear(); }
 
 private:
 	static void _Print(const char* szLog, int nColor = 0);
 	static int g_nLogLevel;
+	static string g_strLastError;
 };

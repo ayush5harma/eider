@@ -1,11 +1,11 @@
 #include "common.h"
 #include "openssl.h"
-#include <openssl/pem.h>
-#include <openssl/cms.h>
-#include <openssl/err.h>
-#include <openssl/provider.h>
-#include <openssl/pkcs12.h>
-#include <openssl/conf.h>
+#include <OpenSSL/pem.h>
+#include <OpenSSL/cms.h>
+#include <OpenSSL/err.h>
+#include <OpenSSL/provider.h>
+#include <OpenSSL/pkcs12.h>
+#include <OpenSSL/conf.h>
 
 const char* ZSignAsset::s_szAppleDevCACert = ""
 "-----BEGIN CERTIFICATE-----\n"

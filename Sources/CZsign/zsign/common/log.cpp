@@ -2,6 +2,7 @@
 
 
 int ZLog::g_nLogLevel = ZLog::E_INFO;
+string ZLog::g_strLastError;
 
 void ZLog::_Print(const char* szLog, int nColor)
 {
@@ -66,6 +67,7 @@ void ZLog::PrintV(int nLevel, const char* szFormat, ...)
 
 bool ZLog::Error(const char* szLog)
 {
+	g_strLastError = szLog;
 	_Print(szLog, 12);
 	return false;
 }
@@ -73,6 +75,7 @@ bool ZLog::Error(const char* szLog)
 bool ZLog::ErrorV(const char* szFormat, ...)
 {
 	FORMAT_V(szFormat, szLog);
+	g_strLastError = szLog;
 	_Print(szLog, 12);
 	return false;
 }

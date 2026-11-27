@@ -4,7 +4,7 @@
 #include "openssl.h"
 #include "signing.h"
 #include <algorithm>
-#include <openssl/sha.h>
+#include <OpenSSL/sha.h>
 
 void ZSign::_DERLength(string& strBlob, uint64_t uLength)
 {

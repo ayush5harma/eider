@@ -338,9 +338,26 @@ bool ZArchO::BuildCodeSignature(ZSignAsset* pSignAsset,
 	string strDerEntitlementsSlot;
 
 	string strEmptyEntitlements = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict/>\n</plist>\n";
+	// Eider: a wildcard profile carries application-identifier PREFIX.*.
+	// Each executable is signed with PREFIX.<its own bundle id> instead, as
+	// Xcode does, so the main app and every extension get their own identity.
+	string strEntitleData = pSignAsset->m_strEntitleData;
+	if (IsExecute() && !strBundleId.empty() && !strEntitleData.empty()) {
+		jvalue jvEntitle;
+		if (jvEntitle.read_plist(strEntitleData) && jvEntitle.has("application-identifier")) {
+			string strAppId = jvEntitle["application-identifier"].as_cstr();
+			size_t pos = strAppId.find('.');
+			if (string::npos != pos) {
+				jvEntitle["application-identifier"] = strAppId.substr(0, pos + 1) + strBundleId;
+				strEntitleData.clear();
+				jvEntitle.style_write_plist(strEntitleData);
+			}
+		}
+	}
+
 	ZSign::SlotBuildRequirements(strBundleId, pSignAsset->m_strSubjectCN, strRequirementsSlot);
-	ZSign::SlotBuildEntitlements(IsExecute() ? pSignAsset->m_strEntitleData : strEmptyEntitlements, strEntitlementsSlot);
-	ZSign::SlotBuildDerEntitlements(IsExecute() ? pSignAsset->m_strEntitleData : "", strDerEntitlementsSlot);
+	ZSign::SlotBuildEntitlements(IsExecute() ? strEntitleData : strEmptyEntitlements, strEntitlementsSlot);
+	ZSign::SlotBuildDerEntitlements(IsExecute() ? strEntitleData : "", strDerEntitlementsSlot);
 
 	string strRequirementsSlotSHA1;
 	string strRequirementsSlotSHA256;

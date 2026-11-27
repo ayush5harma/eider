@@ -23,12 +23,23 @@ let package = Package(
     targets: [
         // Platform-neutral: sources, catalogs, downloads, update matching.
         .target(name: "EiderCore"),
+        // zsign (MIT, zhlynn/zsign), vendored; see Sources/CZsign/UPSTREAM.md.
+        // Swift sees only the C header in include/.
+        .target(
+            name: "CZsign",
+            dependencies: [.product(name: "OpenSSL", package: "OpenSSL")],
+            exclude: ["LICENSE", "UPSTREAM.md"],
+            cxxSettings: [
+                .headerSearchPath("zsign"),
+                .headerSearchPath("zsign/common"),
+            ]
+        ),
         // On-device code signing with the user's own certificate.
         .target(
             name: "EiderSign",
             dependencies: [
+                "CZsign",
                 .product(name: "X509", package: "swift-certificates"),
-                .product(name: "OpenSSL", package: "OpenSSL"),
             ]
         ),
         // Unpack, repack and install IPAs on the device the app runs on.
