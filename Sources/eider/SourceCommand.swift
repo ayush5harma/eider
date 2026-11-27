@@ -5,8 +5,11 @@ import Foundation
 struct SourceCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "source",
-        abstract: "Add, list, remove and refresh sources.",
-        subcommands: [SourceAddCommand.self, SourceListCommand.self, SourceRemoveCommand.self, SourceRefreshCommand.self]
+        abstract: "Add, list, remove, refresh, import and export sources.",
+        subcommands: [
+            SourceAddCommand.self, SourceListCommand.self, SourceRemoveCommand.self, SourceRefreshCommand.self,
+            SourceImportCommand.self, SourceExportCommand.self,
+        ]
     )
 }
 
