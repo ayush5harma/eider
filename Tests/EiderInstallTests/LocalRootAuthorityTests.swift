@@ -13,7 +13,7 @@ final class LocalRootAuthorityTests: XCTestCase {
     }
 
     override func tearDown() {
-        keychain.delete()
+        keychain?.delete()
     }
 
     private func authority(now: @escaping @Sendable () -> Date = { Date() }) -> LocalRootAuthority {

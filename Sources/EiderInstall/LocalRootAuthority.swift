@@ -209,6 +209,41 @@ public actor LocalRootAuthority {
         return try Self.secCertificate(try Self.der(certificate))
     }
 
+    // MARK: Trust status
+
+    /// `.ready` when an HTTPS request to a loopback server presenting our leaf succeeds with
+    /// the default system trust (a URLSession without a delegate): that only happens once the
+    /// user installed the profile and turned on full trust for the root. Does not create a root.
+    public func status() async -> LocalInstallStatus {
+        await status(probeWith: nil)
+    }
+
+    /// `session` stands in for the default-trust session in tests on the Mac, where the root
+    /// cannot be trusted system-wide without prompting the owner.
+    func status(probeWith session: URLSession?) async -> LocalInstallStatus {
+        guard (try? hasRoot()) == true else { return .notSetUp }
+        guard let server = try? serverIdentity() else { return .needsTrust }
+        return await Self.probe(server, session: session) ? .ready : .needsTrust
+    }
+
+    static func probe(_ server: ServerIdentity, session: URLSession?) async -> Bool {
+        let token = randomHex(bytes: 16)
+        let body = Data("eider-ok".utf8)
+        let http = LoopbackHTTPServer(identity: server.identity) { request in
+            request.path == "/\(token)/probe" ? .data(body, contentType: "text/plain") : nil
+        }
+        guard let port = try? await http.start() else { return false }
+        defer { http.stop() }
+
+        let ownSession = session == nil
+        let session = session ?? URLSession(configuration: .ephemeral)
+        defer { if ownSession { session.finishTasksAndInvalidate() } }
+        let request = URLRequest(url: URL(string: "https://127.0.0.1:\(port)/\(token)/probe")!,
+                                 cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        guard let (data, response) = try? await session.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200 && data == body
+    }
+
     // MARK: Helpers
 
     static func der(_ certificate: Certificate) throws -> Data {
