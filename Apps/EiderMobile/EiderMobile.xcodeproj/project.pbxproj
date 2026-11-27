@@ -35,6 +35,7 @@
 		B5700201C2A0D39A07777E25 /* EiderMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED610816CCC17A30E8660BF4 /* EiderMobileApp.swift */; };
 		CBD097667FE4AE1FAFE26570 /* CertificateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BFF9F2B9B2C36515AA556A3 /* CertificateStore.swift */; };
 		CF7630E61B171D187200D0C9 /* InstallJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E2DEE395687E19DD3BA308 /* InstallJob.swift */; };
+		D27B6C2C9C6E0B0155616148 /* InstallSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0159BE5A64F018856BF6BCFE /* InstallSetupView.swift */; };
 		DB6D93B258E8C3F1DFA82F19 /* MobileModel+Sources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 540A04207CB3496336210B12 /* MobileModel+Sources.swift */; };
 		EB92BA71B2B0F1382261371C /* MobileModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89C28BAB44CC28A55A09AB2 /* MobileModel.swift */; };
 		EBCE5197C955EB56E49A9F12 /* CertificatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4980DFBA1592DC0946F20D85 /* CertificatesView.swift */; };
@@ -42,6 +43,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0159BE5A64F018856BF6BCFE /* InstallSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallSetupView.swift; sourceTree = "<group>"; };
 		115F45E3AB8A255DFA123D35 /* BrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowseView.swift; sourceTree = "<group>"; };
 		2A1A3525AAF550C5EBE8FD2D /* AddCertificateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCertificateView.swift; sourceTree = "<group>"; };
 		3EAC1ACC60B351DE63570EFA /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
@@ -74,7 +76,7 @@
 		E89C28BAB44CC28A55A09AB2 /* MobileModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModel.swift; sourceTree = "<group>"; };
 		EC6A079160A7148133B3BB54 /* AppInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppInstaller.swift; sourceTree = "<group>"; };
 		ED610816CCC17A30E8660BF4 /* EiderMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EiderMobileApp.swift; sourceTree = "<group>"; };
-		"TEMP_4A551205-C3E8-43AE-8C67-371CEB41F35B" /* EiderMobile.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = EiderMobile.xcconfig; sourceTree = "<group>"; };
+		"TEMP_624C20AD-34ED-4AF4-9CD1-DBC12356F425" /* EiderMobile.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = EiderMobile.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,6 +135,7 @@
 				CC3D0CFAEC595745B48C30E6 /* AppDetailView.swift */,
 				115F45E3AB8A255DFA123D35 /* BrowseView.swift */,
 				4980DFBA1592DC0946F20D85 /* CertificatesView.swift */,
+				0159BE5A64F018856BF6BCFE /* InstallSetupView.swift */,
 				E62CF9C69FFA3B2D6A15EA83 /* InstallSheet.swift */,
 				C6F27C88A1AF50A0EFA13B9D /* LibraryView.swift */,
 				AB38A69BE1C63B32786E2581 /* RootView.swift */,
@@ -218,10 +221,10 @@
 			path = Model;
 			sourceTree = "<group>";
 		};
-		"TEMP_16D58A4A-033D-44B4-BB66-F24174DE53BE" /* EiderMobile */ = {
+		"TEMP_B713C2F0-A50F-4F08-B881-B27F0F480A4F" /* EiderMobile */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_4A551205-C3E8-43AE-8C67-371CEB41F35B" /* EiderMobile.xcconfig */,
+				"TEMP_624C20AD-34ED-4AF4-9CD1-DBC12356F425" /* EiderMobile.xcconfig */,
 			);
 			path = EiderMobile;
 			sourceTree = "<group>";
@@ -315,6 +318,7 @@
 				B5700201C2A0D39A07777E25 /* EiderMobileApp.swift in Sources */,
 				CF7630E61B171D187200D0C9 /* InstallJob.swift in Sources */,
 				5EB0BAFA2A37B60C543C4F4E /* InstallServices.swift in Sources */,
+				D27B6C2C9C6E0B0155616148 /* InstallSetupView.swift in Sources */,
 				7BAF5FD6C5C6CB5AF437648A /* InstallSheet.swift in Sources */,
 				814615BE51EC42AE64D836A7 /* Keychain.swift in Sources */,
 				854FF0561ED25A62CB48BE79 /* LibraryRecords.swift in Sources */,
@@ -340,7 +344,7 @@
 /* Begin XCBuildConfiguration section */
 		156E6C51AF002062875B96D5 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_4A551205-C3E8-43AE-8C67-371CEB41F35B" /* EiderMobile.xcconfig */;
+			baseConfigurationReference = "TEMP_624C20AD-34ED-4AF4-9CD1-DBC12356F425" /* EiderMobile.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "$(EIDER_IDENTITY:default=Apple Development)";
@@ -431,7 +435,7 @@
 		};
 		61E23140BAC0DA1594F0A634 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_4A551205-C3E8-43AE-8C67-371CEB41F35B" /* EiderMobile.xcconfig */;
+			baseConfigurationReference = "TEMP_624C20AD-34ED-4AF4-9CD1-DBC12356F425" /* EiderMobile.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "$(EIDER_IDENTITY:default=Apple Development)";

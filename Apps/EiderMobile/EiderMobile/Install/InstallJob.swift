@@ -31,36 +31,46 @@ final class InstallJob: Identifiable {
         let options: SignOptions
     }
 
+    /// How long the work directory outlives the hand-off: EiderInstall keeps
+    /// serving for a 10 s grace period in case iOS asks for a range again.
+    private static let cleanupDelay: Duration = .seconds(60)
+
     let id = UUID()
     private(set) var phases: [Step: Phase] = Dictionary(uniqueKeysWithValues: Step.allCases.map { ($0, .waiting) })
     private(set) var isRunning = false
+    /// What the Install step is waiting on ("Waiting for you to confirm...").
+    private(set) var installDetail: String?
+    /// iOS's fetch of the signed IPA, once it has started.
+    private(set) var installFraction: Double?
     private(set) var installed: InstalledApp?
     private(set) var failure: String?
 
     func phase(of step: Step) -> Phase { phases[step] ?? .waiting }
 
     /// Runs every step in order and stops at the first failure. Returns the
-    /// record to keep when the app reached the device.
+    /// record kept once iOS has the whole signed IPA.
     @discardableResult
     func run(_ request: Request, model: MobileModel) async -> InstalledApp? {
         guard !isRunning else { return nil }
         isRunning = true
         failure = nil
         installed = nil
+        installDetail = nil
+        installFraction = nil
         phases = Dictionary(uniqueKeysWithValues: Step.allCases.map { ($0, .waiting) })
         defer { isRunning = false }
 
         let signer = model.signer
         let installer = model.installer
         let work = model.paths.work.appendingPathComponent(id.uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: work) }
+        defer { Self.removeLater(work) }
 
         do {
             let material = try await model.certificateStore.material(for: request.certificate.id)
             try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
 
             let appURL = try await step(.unpack) {
-                try await installer.unpack(ipaAt: request.ipaURL, into: work)
+                try await installer.unpack(ipaAt: request.ipaURL, into: work.appendingPathComponent("unpacked", isDirectory: true))
             }
             let info = try await Task.detached { try BundleInfo.read(appAt: appURL) }.value
             try await step(.sign) {
@@ -70,15 +80,33 @@ final class InstallJob: Identifiable {
             try await step(.package) {
                 try await installer.package(appAt: appURL, into: signed)
             }
-            let bundleID = request.options.bundleIdentifier ?? info.bundleID
-            let version = request.options.version ?? info.version
-            let name = request.options.displayName ?? info.name
+            // Signing may have changed these; the manifest must match the signed app.
+            let signedInfo = (try? await Task.detached { try BundleInfo.read(appAt: appURL) }.value) ?? info
             try await step(.install) {
-                try await installer.install(ipaAt: signed, bundleIdentifier: bundleID, version: version, title: name)
+                installDetail = "Starting the local server..."
+                let stages = try await installer.install(
+                    ipaAt: signed, bundleIdentifier: signedInfo.bundleID,
+                    version: signedInfo.version, title: signedInfo.name)
+                var handed = false
+                for try await stage in stages {
+                    switch stage {
+                    case .opened:
+                        installDetail = "Confirm Install in the alert iOS shows."
+                    case .manifestFetched:
+                        installDetail = "iOS is fetching the app..."
+                    case .downloading(let sent, let total):
+                        installFraction = total > 0 ? Double(sent) / Double(total) : nil
+                    case .handedToIOS:
+                        handed = true
+                        installFraction = 1
+                    }
+                }
+                guard handed else { throw InstallJobError.notHandedOver }
+                installDetail = "Handed to iOS: confirm Install in the alert if it is still showing, then watch the Home Screen."
             }
 
             let record = InstalledApp(
-                bundleID: bundleID, name: name, version: version, build: info.build,
+                bundleID: signedInfo.bundleID, name: signedInfo.name, version: signedInfo.version, build: signedInfo.build,
                 sourceURL: request.ipa.origin?.sourceURL, origin: request.ipa.origin,
                 installedAt: Date(), certificateID: request.certificate.id, iconURL: request.ipa.iconURL)
             installed = record
@@ -102,5 +130,21 @@ final class InstallJob: Identifiable {
             failure = message
             throw error
         }
+    }
+
+    private static func removeLater(_ directory: URL) {
+        let delay = cleanupDelay
+        Task.detached(priority: .background) {
+            try? await Task.sleep(for: delay)
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+}
+
+enum InstallJobError: LocalizedError {
+    case notHandedOver
+
+    var errorDescription: String? {
+        "iOS did not fetch the app. If you tapped Cancel in the alert, install again."
     }
 }

@@ -47,6 +47,11 @@ extension MobileModel {
             tab = .certificates
             return
         }
+        await checkInstallReadiness()
+        guard installReadiness == .ready else {
+            showingSettings = true
+            return
+        }
         isUpdatingAll = true
         defer { isUpdatingAll = false }
         for offer in updates {

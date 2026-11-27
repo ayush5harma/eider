@@ -17,6 +17,8 @@ struct InstallSheet: View {
     @State private var enableFileSharing = false
     @State private var removeURLSchemes = false
     @State private var addingCertificate = false
+    @State private var settingUp = false
+    @State private var validationMessage: String?
 
     private var ipa: LibraryIPA { request.ipa }
 
@@ -47,7 +49,7 @@ struct InstallSheet: View {
                         if let certificate = selectedCertificate {
                             LabeledContent("Profile", value: certificate.profile.name)
                             LabeledContent("Expires") {
-                                Text(Format.date(certificate.profile.expires))
+                                Text(Format.date(certificate.expires))
                                     .foregroundStyle(certificate.expires(within: MobileModel.expiryWarning) ? .red : .secondary)
                             }
                         }
@@ -83,12 +85,17 @@ struct InstallSheet: View {
 
                 Section("Progress") {
                     StepList(job: job)
-                    if let failure = job.failure {
-                        Text(failure).font(.callout).foregroundStyle(.red)
+                    if let fraction = job.installFraction, job.installed == nil {
+                        ProgressView(value: fraction)
+                            .accessibilityLabel("iOS is fetching the app, \(Int(fraction * 100)) percent")
                     }
-                    if job.installed != nil {
-                        Label("Installed. Find it on your Home Screen.", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                    if let detail = job.installDetail {
+                        Label(detail, systemImage: job.installed == nil ? "info.circle" : "checkmark.circle.fill")
+                            .font(.callout)
+                            .foregroundStyle(job.installed == nil ? Color.secondary : Color.green)
+                    }
+                    if let message = validationMessage ?? job.failure {
+                        Text(message).font(.callout).foregroundStyle(.red)
                     }
                 }
             }
@@ -122,6 +129,7 @@ struct InstallSheet: View {
             }
             .interactiveDismissDisabled(job.isRunning)
             .sheet(isPresented: $addingCertificate) { AddCertificateView() }
+            .sheet(isPresented: $settingUp) { InstallSetupView() }
             .onAppear {
                 certificateID = certificateID ?? model.defaultCertificate?.id
                 if bundleID.isEmpty, let replacing = request.replacing, replacing.bundleID != ipa.bundleID {
@@ -144,8 +152,9 @@ struct InstallSheet: View {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
+        validationMessage = nil
         if let id = value(bundleID), !BundleIdentifier.isValid(id) {
-            model.errorMessage = "\(id) is not a valid bundle id."
+            validationMessage = "\(id) is not a valid bundle id."
             return
         }
         let options = SignOptions(
@@ -154,7 +163,15 @@ struct InstallSheet: View {
             removeURLSchemes: removeURLSchemes)
         let request = InstallJob.Request(
             ipa: ipa, ipaURL: model.library.fileURL(of: ipa), certificate: certificate, options: options)
-        Task { await job.run(request, model: model) }
+        Task {
+            // Not trusted yet: the one-time setup, not a failure at the last step.
+            await model.checkInstallReadiness()
+            guard model.installReadiness == .ready else {
+                settingUp = true
+                return
+            }
+            await job.run(request, model: model)
+        }
     }
 }
 

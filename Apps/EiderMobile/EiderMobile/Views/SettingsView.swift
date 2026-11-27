@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(MobileModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
 
     private static let repository = URL(string: "https://github.com/ayush5harma/eider")!
 
@@ -29,13 +31,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    LabeledContent("Method", value: "On this device")
-                } header: {
-                    Text("Install Method")
-                } footer: {
-                    Text("Eider installs signed apps on this iPhone or iPad through a local server only it can vouch for. The one-time setup for it will appear here when the installer is ready.")
-                }
+                InstallSetupSections()
 
                 Section("About") {
                     LabeledContent("Version", value: version)
@@ -54,6 +50,11 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .task { await model.checkInstallReadiness() }
+            // Back from Settings, where trust is turned on: ask again.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await model.checkInstallReadiness() } }
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
