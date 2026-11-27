@@ -1,0 +1,9 @@
+# The root .gitignore drops every *.xcodeproj (Mac builds use SwiftPM). This
+# one is generated from project.yml and committed so the app opens without
+# XcodeGen; per-user state inside it stays out.
+!EiderMobile.xcodeproj
+EiderMobile.xcodeproj/xcuserdata/
+EiderMobile.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Signing values for one person's machine (see Local.xcconfig.example).
+Local.xcconfig

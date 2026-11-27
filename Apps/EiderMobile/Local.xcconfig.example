@@ -1,0 +1,17 @@
+// Copy to Local.xcconfig (gitignored) to sign Eider for your own device in Xcode.
+// Scripts/ios-device.sh does not need this file: it reads the same values from
+// TEAM, PROFILE, IDENTITY and DEVICE in the environment.
+
+// Your Apple Developer team id (ten characters).
+EIDER_TEAM = ABCDE12345
+
+// Manual signing with a named profile. Leave EIDER_SIGN_STYLE out (and
+// EIDER_PROFILE empty) to let Xcode manage signing automatically instead.
+EIDER_SIGN_STYLE = Manual
+
+// The provisioning profile's name or UUID. It must cover the bundle id
+// io.github.ayush5harma.EideriOS (a wildcard profile does) and your device.
+EIDER_PROFILE = 00000000-0000-0000-0000-000000000000
+
+// The certificate: "Apple Development", "iPhone Developer", or its full name.
+EIDER_IDENTITY = Apple Development

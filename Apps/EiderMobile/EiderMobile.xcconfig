@@ -1,0 +1,4 @@
+// Target settings for the app. Signing values stay out of the repository:
+// copy Local.xcconfig.example to Local.xcconfig (gitignored) and fill it in,
+// or let Scripts/ios-device.sh pass them on the command line.
+#include? "Local.xcconfig"

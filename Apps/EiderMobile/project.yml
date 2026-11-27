@@ -1,0 +1,63 @@
+# Eider for iPhone and iPad. Generate the Xcode project with
+#   nix run nixpkgs#xcodegen -- generate --spec Apps/EiderMobile/project.yml
+# and commit the result with this file (docs/IOS.md).
+#
+# Signing is not in the committed project: this repository is public. The
+# target reads EIDER_TEAM, EIDER_PROFILE, EIDER_IDENTITY and EIDER_SIGN_STYLE,
+# which come from a gitignored Local.xcconfig (see Local.xcconfig.example) when
+# building in Xcode, or from the command line in Scripts/ios-device.sh. They are
+# custom names on purpose: passing PROVISIONING_PROFILE_SPECIFIER itself on the
+# command line would also apply it to every Swift package target, which Xcode
+# refuses.
+name: EiderMobile
+options:
+  bundleIdPrefix: io.github.ayush5harma
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  Eider:
+    path: ../..
+settings:
+  base:
+    MARKETING_VERSION: 0.2.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: "5.0"
+targets:
+  EiderMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    configFiles:
+      Debug: EiderMobile.xcconfig
+      Release: EiderMobile.xcconfig
+    sources:
+      - path: EiderMobile
+      # The Icon Composer file the Mac app uses; Xcode 26 and later compile
+      # it for iOS too, with the Dark, Clear and Tinted appearances.
+      - path: ../../Resources/AppIcon.icon
+        type: file
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Eider
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ayush5harma.EideriOS
+        INFOPLIST_FILE: EiderMobile/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+        CODE_SIGN_STYLE: $(EIDER_SIGN_STYLE:default=Automatic)
+        DEVELOPMENT_TEAM: $(EIDER_TEAM)
+        PROVISIONING_PROFILE_SPECIFIER: $(EIDER_PROFILE)
+        CODE_SIGN_IDENTITY: $(EIDER_IDENTITY:default=Apple Development)
+    dependencies:
+      - package: Eider
+        product: EiderCore
+      - package: Eider
+        product: EiderSign
+      - package: Eider
+        product: EiderInstall
+    scheme: {}
