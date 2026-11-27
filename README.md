@@ -35,6 +35,8 @@ result). Exit codes: 0 success, 1 usage error, 2 failure.
 eider source add https://example.com/source.json   # add a source
 eider source list                                  # sources you added
 eider source refresh                               # fetch them all again
+eider source export -o sources.json                # save your list of sources
+eider source import sources.json                   # add the sources in a file (- reads stdin)
 eider search camera                                # find an app
 eider info com.example.app                         # what the sources offer
 eider install com.example.app                      # newest version, from a source

@@ -1,12 +1,14 @@
 import AppKit
 import EiderKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The sources as a System Settings page: an Add section, the list of sources
 /// with their state, and the news of the one selected. Grouped form, flat rows.
 struct SourcesView: View {
     @Bindable var model: AppModel
     @State private var showingWarnings: CatalogSource?
+    @State private var choosingImportFile = false
 
     var body: some View {
         Form {
@@ -14,7 +16,12 @@ struct SourcesView: View {
                 HStack(spacing: 10) {
                     TextField("Address", text: $model.newSourceText, prompt: Text("https://example.com/apps.json"))
                         .onSubmit { Task { await model.addSourceFromText() } }
-                    if model.isAddingSource { ProgressView().controlSize(.small) }
+                    if model.isAddingSource {
+                        ProgressView().controlSize(.small)
+                        if let progress = model.sourceImportProgress {
+                            Text(progress.label).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
                     Button("Add") { Task { await model.addSourceFromText() } }
                         .rowCapsule(prominent: true)
                         .disabled(model.newSourceText.isEmpty || model.isAddingSource)
@@ -66,6 +73,7 @@ struct SourcesView: View {
         .navigationSubtitle(model.sources.count == 1 ? "1 source" : "\(model.sources.count) sources")
         .toolbar {
             ToolbarItemGroup {
+                importExportMenu
                 Button {
                     Task { await model.refreshAllSources() }
                 } label: {
@@ -83,6 +91,102 @@ struct SourcesView: View {
             }
         }
         .sheet(item: $showingWarnings) { WarningsSheet(source: $0) }
+        .sheet(isPresented: Binding(
+            get: { model.sourceImportResult != nil }, set: { if !$0 { model.sourceImportResult = nil } })
+        ) {
+            if let result = model.sourceImportResult { ImportSummarySheet(result: result) }
+        }
+        .fileImporter(isPresented: $choosingImportFile, allowedContentTypes: [.json, .plainText]) { outcome in
+            switch outcome {
+            case .success(let url): Task { await model.importSources(fromFile: url) }
+            case .failure(let error): model.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private var importExportMenu: some View {
+        Menu {
+            Button("Import Sources...") { choosingImportFile = true }
+                .accessibilityLabel("Import Sources...")
+                .disabled(model.isAddingSource)
+            Button("Import from Clipboard") { importFromClipboard() }
+                .accessibilityLabel("Import from Clipboard")
+                .disabled(model.isAddingSource)
+            Divider()
+            Button("Export Sources...") { exportSources() }
+                .accessibilityLabel("Export Sources...")
+                .disabled(model.sources.isEmpty)
+            Button("Copy All Source URLs") { copyAllSourceURLs() }
+                .accessibilityLabel("Copy All Source URLs")
+                .disabled(model.sources.isEmpty)
+        } label: {
+            Label("Import and Export", systemImage: "square.and.arrow.up.on.square")
+        }
+        .accessibilityLabel("Import and Export")
+        .help("Import sources from a file or the clipboard, or export the list")
+    }
+
+    private func importFromClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string),
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            model.errorMessage = "The clipboard has no text to import."
+            return
+        }
+        Task { await model.importSources(from: Data(text.utf8)) }
+    }
+
+    private func copyAllSourceURLs() {
+        let text = model.allSourceURLsText.trimmingCharacters(in: .newlines)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// JSON by default; the chosen name decides, so "sources.txt" writes plain text.
+    private func exportSources() {
+        let panel = NSSavePanel()
+        panel.title = "Export Sources"
+        panel.nameFieldStringValue = "Eider Sources.json"
+        panel.allowedContentTypes = [.json, .plainText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try model.sourceListFile(named: url.lastPathComponent).write(to: url, options: .atomic)
+        } catch {
+            model.errorMessage = "Could not export the sources: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct ImportSummarySheet: View {
+    let result: SourceImportResult
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Import Finished").font(.title3.bold())
+            Text(result.summary).font(.headline)
+            if result.hasProblems {
+                List {
+                    // Offsets, not addresses: several entries can be rejected under the same text.
+                    ForEach(Array(result.rejected.enumerated()), id: \.offset) { row("Rejected", $0.element.url, $0.element.reason) }
+                    ForEach(Array(result.failed.enumerated()), id: \.offset) { row("Failed", $0.element.url, $0.element.error) }
+                }
+                .frame(minHeight: 160)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).primaryActionStyle() }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+
+    private func row(_ kind: String, _ address: String, _ reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(address).font(.callout.monospaced()).lineLimit(2).truncationMode(.middle)
+            Text("\(kind): \(reason)").font(.caption).foregroundStyle(.red)
+        }
+        .textSelection(.enabled)
+        .padding(.vertical, 2)
     }
 }
 

@@ -172,3 +172,27 @@ investigate.
 `<url>` follows the URL rules above, except that `file` URLs and loopback
 addresses are never accepted from a link. Percent-encode it if it carries a query string you want
 kept.
+
+## Moving your list of sources
+
+The Sources page has an Import and Export menu, and the CLI has
+`eider source export` and `eider source import`.
+
+- Export writes Eider JSON (the default) or one address per line (a name ending
+  in `.txt` in the app, `--format text` on the command line). The JSON file is
+  `{"format": "eider-sources", "version": 1, "exported": "<ISO 8601>", "sources":
+  [{"url": "...", "name": "..."}]}`; the name is for people reading the file and
+  is ignored on import.
+- Import accepts that JSON file, a JSON array of addresses, a JSON array of
+  objects with a `url`, or plain text with one address per line (blank lines and
+  lines starting with `#` are skipped). A line may also be an
+  `eider://source/<url>` link. The file may be at most 1 MB and list at most 500
+  addresses.
+- Every address follows the URL rules above and is held to the deep-link rules:
+  a list is somebody else's words, so `file` URLs and loopback addresses are
+  rejected (add those by hand). A rejected address is reported with its reason,
+  not dropped. Addresses already added, or listed twice, are skipped.
+- New addresses are fetched at most four at a time. One failing does not stop
+  the rest, and the summary lists it ("Added 3 · 2 already added · 1 rejected ·
+  1 failed"). `eider source import` exits with status 2 when any address was
+  rejected or failed; `--json` carries the full result.

@@ -28,6 +28,8 @@ public struct OperationFailure: Error, Sendable, Equatable, LocalizedError, Cust
             return OperationFailure(code: failure.code, message: failure.message)
         case let failure as CatalogFailure:
             return OperationFailure(code: failure.code, message: failure.message)
+        case let failure as SourceListError:
+            return OperationFailure(code: failure.code, message: failure.message)
         case let failure as UninstallFailure:
             return OperationFailure(code: "uninstall.failed", message: failure.message)
         default:
