@@ -29,8 +29,8 @@ struct AddCertificateView: View {
         NavigationStack {
             Form {
                 Section {
-                    fileButton("Certificate", detail: p12?.name ?? "Choose a .p12 file", systemImage: "key") { picking = .p12 }
-                    fileButton("Provisioning Profile", detail: provision?.name ?? "Choose a .mobileprovision file", systemImage: "doc.badge.gearshape") { picking = .profile }
+                    fileButton("Certificate", detail: p12?.name ?? "Choose...", systemImage: "key") { picking = .p12 }
+                    fileButton("Provisioning Profile", detail: provision?.name ?? "Choose...", systemImage: "doc.badge.gearshape") { picking = .profile }
                 } header: {
                     Text("Files")
                 }

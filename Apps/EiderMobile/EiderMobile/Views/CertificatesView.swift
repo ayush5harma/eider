@@ -2,9 +2,9 @@ import SwiftUI
 
 struct CertificatesView: View {
     @Environment(MobileModel.self) private var model
-    @State private var adding = false
 
     var body: some View {
+        @Bindable var model = model
         NavigationStack {
             Group {
                 if model.certificates.isEmpty {
@@ -13,7 +13,7 @@ struct CertificatesView: View {
                     } description: {
                         Text("Add a development, ad hoc or enterprise certificate: its .p12, the password and its provisioning profile.")
                     } actions: {
-                        Button("Add Certificate") { adding = true }
+                        Button("Add Certificate") { model.addingCertificate = true }
                             .primaryActionStyle()
                     }
                 } else {
@@ -51,10 +51,10 @@ struct CertificatesView: View {
             .settingsToolbar()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { adding = true } label: { Label("Add Certificate", systemImage: "plus") }
+                    Button { model.addingCertificate = true } label: { Label("Add Certificate", systemImage: "plus") }
                 }
             }
-            .sheet(isPresented: $adding) { AddCertificateView() }
+            .sheet(isPresented: $model.addingCertificate) { AddCertificateView() }
         }
     }
 }

@@ -8,7 +8,12 @@ struct EiderMobileApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .task { await model.start() }
+                .task {
+                    await model.start()
+                    #if DEBUG
+                    await ScreenshotDriver.run(model)
+                    #endif
+                }
                 // eider:// links, and IPAs opened from Files or the share sheet.
                 .onOpenURL { url in
                     Task { await model.handle(url) }

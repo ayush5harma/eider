@@ -12,7 +12,7 @@ struct BrowseView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        NavigationStack(path: $model.browsePath) {
             Group {
                 if model.sources.isEmpty {
                     ContentUnavailableView {

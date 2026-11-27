@@ -39,7 +39,10 @@ final class MobileModel {
     @ObservationIgnored let installer: any DeviceInstaller
 
     var tab: AppTab = .browse
+    /// Browse's navigation path, held here so a link can open an app page.
+    var browsePath: [AppRoute] = []
     var showingSettings = false
+    var addingCertificate = false
     var errorMessage: String?
     var pendingLink: DeepLink?
     var installRequest: InstallRequest?
