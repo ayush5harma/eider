@@ -47,6 +47,11 @@ C surface Swift calls), not upstream.
   certificate (a few KB per call).
 - zsign's process-wide state (log level, last error) is why EiderSign
   serialises every call through one actor.
+- Change 3 applies to every executable zsign signs with a bundle id,
+  including any inside `.xpc` bundles or frameworks; EiderSign's
+  explicit-profile check only covers `.app` and `.appex` bundles, the ones
+  zsign renames. Executables outside any bundle are signed with an empty
+  bundle id and keep the profile's value. Both are rare in iOS apps.
 
 ## Updating
 
