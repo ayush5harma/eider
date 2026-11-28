@@ -1,0 +1,66 @@
+title: Build from source and licences
+description: How to build and test Eider from source, how the code is organised, and the licences of Eider and its third-party components.
+---
+<h1>Build from source and licences</h1>
+<p class="lede">Eider is one Swift package. It needs an Apple silicon Mac, macOS 14 or later and a Swift toolchain (Xcode or the Command Line Tools).</p>
+
+<h2 id="build">Building and testing</h2>
+<pre><code>git clone {{repo}}.git
+cd eider
+swift build
+swift test
+Scripts/build-shims.sh      <span class="cmt"># compile the shims into build/shims</span>
+Scripts/call-shims.sh       <span class="cmt"># the CallKit and camera shims, no app or camera needed</span>
+Scripts/engine-e2e.sh       <span class="cmt"># install engine, judged by effect</span>
+Scripts/e2e.sh              <span class="cmt"># source, install, update, doctor, uninstall</span>
+Scripts/make-app.sh         <span class="cmt"># assemble and ad hoc sign build/Eider.app</span></code></pre>
+<p><code>EIDER_E2E_CRASH_CHECKS=1 Scripts/e2e.sh</code> adds the crash checks (missing library, throwing tweak), one crash window each. <code>Scripts/make-app.sh --configuration debug</code> builds a debug bundle. <code>Scripts/release.sh &lt;version&gt;</code> builds release archives locally; it never tags, pushes or publishes. The end-to-end scripts install only into temporary folders, and tests and scripts set <code>EIDER_HOME</code> so nothing touches your real application support folder. They run <code>eider</code> as on a Mac with no developer tools.</p>
+
+<h2 id="ios">Building Eider for iOS</h2>
+<p>The iOS app is an Xcode project in <code>Apps/EiderMobile</code>, generated from <code>project.yml</code> with XcodeGen and committed. Signing values are not in the committed project because the repository is public: the target reads <code>EIDER_TEAM</code>, <code>EIDER_PROFILE</code>, <code>EIDER_IDENTITY</code> and <code>EIDER_SIGN_STYLE</code> from a gitignored <code>Local.xcconfig</code> (see <code>Local.xcconfig.example</code>) in Xcode, or from the environment in <code>Scripts/ios-device.sh</code>:</p>
+<pre><code>TEAM=... PROFILE=... IDENTITY=... DEVICE=... Scripts/ios-device.sh [Debug|Release]</code></pre>
+<p>It builds the app and installs it on a connected device with <code>devicectl</code>. The provisioning profile must cover <code>io.github.ayush5harma.EideriOS</code> (a wildcard profile does) and the device. To check the iOS libraries without a device: <code>xcodebuild -scheme EiderInstall -destination 'generic/platform=iOS' build</code> (the same works for EiderCore and EiderSign). Never commit a certificate, profile, <code>.p12</code> or password.</p>
+
+<h2 id="layout">How the code is organised</h2>
+<pre><code>Eider.app (Sources/EiderApp)      eider CLI (Sources/eider)
+            \                        /
+                 EiderKit (Sources/EiderKit)
+                          |
+                 EiderCore (Sources/EiderCore)</code></pre>
+<p>EiderCore holds the platform-neutral half (catalog, downloads, update matching, paths, image cache, browse index) and also builds for iOS. EiderKit re-exports it, so the command line tool and the Mac app import EiderKit alone. EiderSign and EiderInstall are the iOS signing and install libraries. Each EiderKit module is one directory with one owner:</p>
+<table>
+  <thead><tr><th>Directory</th><th>Holds</th></tr></thead>
+  <tbody>
+    <tr><td><code>Support/</code></td><td>paths, hashing, version, display text, bundle-id check, image cache, process runner</td></tr>
+    <tr><td><code>MachO/</code></td><td>Mach-O reading and editing in pure Swift</td></tr>
+    <tr><td><code>Engine/</code></td><td>IPA to installed app</td></tr>
+    <tr><td><code>Library/</code></td><td>registry of installed apps, uninstall</td></tr>
+    <tr><td><code>Catalog/</code></td><td>source formats and the source list</td></tr>
+    <tr><td><code>Downloads/</code></td><td>fetching IPAs</td></tr>
+    <tr><td><code>Updates/</code></td><td>installed version against catalog version</td></tr>
+    <tr><td><code>Browse/</code></td><td>the catalog flattened for search</td></tr>
+    <tr><td><code>Diagnostics/</code></td><td>why an installed app did not launch</td></tr>
+  </tbody>
+</table>
+<p>The rules every module follows (state under one folder, allowed external programs, untrusted input, typed errors with stable codes) are in <a href="{{repo}}/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>; the contributing guide is <a href="{{repo}}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>. Commit messages use <code>&lt;type&gt;: &lt;why&gt;</code>, and no code from GPL or AGPL projects is accepted.</p>
+
+<h2 id="site">Building this site</h2>
+<p>The site is plain HTML and CSS in <code>site/</code>, built by a small standard-library Python script and deployed by a GitHub Actions workflow:</p>
+<pre><code>python3 site/build.py              <span class="cmt"># writes site/dist</span>
+python3 site/check_links.py        <span class="cmt"># checks every link and anchor in site/dist</span>
+python3 -m http.server -d site/dist</code></pre>
+
+<h2 id="licences">Licences</h2>
+<p><strong>Eider</strong> is released under the <a href="{{repo}}/blob/main/LICENSE">MIT licence</a>, copyright 2026 Ayush Sharma. Eider is inspired by Feather (sources) and PlayCover (the install mechanism), is not affiliated with either, and contains no code from them or from PlayTools.</p>
+<p>Third-party components used by the iOS signing and install libraries. The first four are the ones the iOS app's Settings screen lists; idevice is planned for the pairing method:</p>
+<table>
+  <thead><tr><th>Component</th><th>Used for</th><th>Licence</th></tr></thead>
+  <tbody>
+    <tr><td><a href="https://github.com/zhlynn/zsign">zsign</a></td><td>Code signing in EiderSign, vendored with its licence and a note of the upstream commit</td><td>MIT</td></tr>
+    <tr><td><a href="https://github.com/krzyzanowskim/OpenSSL">OpenSSL</a> (krzyzanowskim/OpenSSL binary package)</td><td>Cryptography for signing and certificates</td><td>Apache-2.0</td></tr>
+    <tr><td><a href="https://github.com/apple/swift-certificates">swift-certificates</a></td><td>X.509 certificates for the local root and server certificate</td><td>Apache-2.0</td></tr>
+    <tr><td><a href="https://github.com/weichsel/ZIPFoundation">ZIPFoundation</a></td><td>Unpacking and repacking IPAs</td><td>MIT</td></tr>
+    <tr><td><a href="https://github.com/jkcoxson/idevice">idevice</a></td><td>The planned pairing install method; a prebuilt framework is attached to the project's releases but not yet wired into the app</td><td>MIT</td></tr>
+  </tbody>
+</table>
+<p>The command line tool also uses <a href="https://github.com/apple/swift-argument-parser">swift-argument-parser</a> (Apache-2.0).</p>

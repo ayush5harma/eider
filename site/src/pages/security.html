@@ -1,0 +1,58 @@
+title: Security and privacy
+description: Eider's security model (untrusted sources and IPAs, encrypted IPAs refused, name-constrained local root, secrets in the Keychain), its privacy position, and its no-piracy stance.
+---
+<h1>Security and privacy</h1>
+<p class="lede">Sources, IPAs, their <code>Info.plist</code> files and file names are untrusted input. Eider is built so that a source can only make it download a file, and installing that file never executes anything from it.</p>
+
+<h2 id="stance">The no-piracy stance</h2>
+<div class="note">
+  <p>Use Eider only with apps you have the right to run: apps you own, hold a licence for, or that are open source or otherwise freely distributable.</p>
+</div>
+<ul>
+  <li><strong>Eider ships no sources.</strong> It has no built-in list of apps and no default repository. You add the sources you trust.</li>
+  <li><strong>Eider decrypts nothing.</strong> Binaries still encrypted with FairPlay (what the App Store delivers) are refused. It starts from an <code>.ipa</code> that is already decrypted and does not explain, link to or provide any way to do that step.</li>
+  <li>A source must only list IPAs its author has the right to distribute. Obtaining or decrypting an App Store binary may breach Apple's terms of service and, depending on where you are, local law; weighing that is yours to do.</li>
+  <li>Eider is not a jailbreak tool and not a FairPlay remover. Its own test apps are open-source apps from their own releases, never cracked or paid apps.</li>
+</ul>
+
+<h2 id="model">Security model</h2>
+<h3>Network and URLs</h3>
+<ul>
+  <li>https only. <code>http</code> is allowed to this Mac only, and only for a source you added by a loopback address and the items inside it. Rules are checked on every redirect. See the <a href="sources.html#url-rules">URL policy</a>.</li>
+  <li>A deep link (<code>eider://</code>) always asks first and never carries a <code>file</code> URL or loopback address. Imported lists are held to the same rule.</li>
+  <li>Downloads are checked against a published SHA-256 and the first hash an address ever served, and resume only against the same address and version.</li>
+</ul>
+<h3>Archives and installs</h3>
+<ul>
+  <li>Archive entries may not escape the extraction folder. Symlinks are recreated only with relative targets without <code>..</code>. The 8 GB cap counts bytes actually written.</li>
+  <li>Nothing from an IPA runs during install. Names are stripped of control and bidi characters, and bundle ids are validated before they become paths or signing inputs.</li>
+  <li>Encrypted binaries are refused.</li>
+  <li>A catalog install must yield the app the source listed. A bundle already at the destination is replaced only if Eider installed it or you pass <code>--force</code>, and the old copy goes to the Trash, never deleted.</li>
+  <li>Signing gives an app a fixed sandbox entitlement set plus its own app-group ids. Entitlements that belong to a developer account are not copied.</li>
+  <li>The install path runs only a short list of system programs (<code>codesign</code>, <code>unzip</code>, <code>ditto</code>, <code>open</code>, <code>log</code>, <code>lsregister</code>), never developer tools.</li>
+</ul>
+<h3>Secrets and trust on iOS</h3>
+<ul>
+  <li>Certificate passwords, the manifest server's URL (its path is a secret) and a pairing file are kept in the Keychain on the device only, never in a plist or database. The pairing file is never a file.</li>
+  <li>The local root that signs the install server's certificate is <strong>name-constrained</strong> to loopback and private address ranges plus <code>localhost</code>, with its private key held in the Keychain and never exported. Even a leaked key could not vouch for a public site. Eider does not ship or download anyone's published private key.</li>
+  <li>The install server answers only the iPhone itself, serves one path under a random 128-bit token per install, and stops shortly after the IPA has been served. See <a href="ios.html#local-trust">the details</a>.</li>
+</ul>
+<h3>Known security-relevant limits</h3>
+<ul>
+  <li>The Mac keychain shim stores logins as a plain file under ordinary file permissions in the app's container, not behind your login password.</li>
+  <li>Eider's own releases are ad hoc signed and not notarized (you approve the first launch in System Settings).</li>
+  <li>A checksum in a source is checked when present, but a source without one is not a verified source. Install only from sources and IPAs you trust.</li>
+</ul>
+
+<h2 id="reporting">Reporting a vulnerability</h2>
+<p>Use GitHub private vulnerability reporting: open the repository's Security tab and choose &ldquo;Report a vulnerability&rdquo;, or <a href="{{repo}}/security/advisories/new">go straight there</a>. Do not open a public issue. Include the Eider version, macOS version and the smallest input that reproduces the problem.</p>
+<p>In scope: archive extraction that escapes the folder or the size caps; downloads that bypass the https-only rule, a redirect that leaves the policy, or a checksum mismatch that is accepted; a source or deep link that crashes Eider, reads local files, or makes Eider fetch something it should not; anything that makes Eider run code from an IPA during install or sign, place files outside its own state folder, or install an app meant to be refused. Out of scope: vulnerabilities in an app you chose to install, and the fact that releases are ad hoc signed and not notarized. This is a small volunteer-run project; reports are acknowledged as soon as practical and fixes ship in the next release. The full policy is <a href="{{repo}}/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+
+<h2 id="privacy">Privacy</h2>
+<ul>
+  <li><strong>No analytics, no telemetry, no accounts.</strong> The source code contains no analytics or crash-reporting code, and Eider has no server of its own.</li>
+  <li><strong>Your data stays on your machine.</strong> On the Mac, Eider keeps its state (your source list, saved catalogs, downloads, the library record and an image cache) in its own folder under <code>~/Library/Application Support/Eider</code>. <code>brew uninstall --zap --cask eider</code> removes it.</li>
+  <li><strong>The network traffic is yours.</strong> Eider contacts the addresses of the sources you add, the download and image addresses those sources list, and the address of an IPA you give it. On iOS it also asks Apple's OCSP responder whether a certificate is revoked, contacts the manifest server you configure, and can open LocalDevVPN's App Store page. The pages of this site are static, with no scripts or cookies of their own.</li>
+  <li><strong>What the sources see.</strong> A source's host sees the requests Eider makes for it, as any web server sees any client. Choose sources accordingly.</li>
+  <li><strong>Certificates and pairing files</strong> are secrets. Keep test copies outside any repository, and never share them.</li>
+</ul>

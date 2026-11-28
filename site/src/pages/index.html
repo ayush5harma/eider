@@ -1,0 +1,106 @@
+title: Eider - install iOS apps from sources as Mac apps
+description: Eider adds AltStore and PlayCover style sources, downloads the iOS apps they list and installs them as ordinary Mac apps on Apple silicon. A Mac app, a command line tool, and an iPhone and iPad app that signs with your own certificate.
+---
+<section class="hero wrap">
+  <img class="icon" src="assets/icon-512.png" alt="The Eider app icon: folded orange, pink, gold and violet paper on black" width="128" height="128">
+  <h1>Eider</h1>
+  <p class="lede">Add sources. Browse apps. Install iPhone and iPad apps as <span class="accent">ordinary Mac apps</span> on Apple silicon.</p>
+  <div class="btns">
+    <a class="btn" href="{{zip_url}}">Download Eider {{version}}</a>
+    <a class="btn secondary" href="#install">Install with Homebrew</a>
+    <a class="btn secondary" href="{{repo}}">View on GitHub</a>
+  </div>
+  <small>Pre-release. Apple silicon, macOS 14 or later. Ad hoc signed, not notarized. MIT licence.</small>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2 class="section-title">What Eider is</h2>
+    <p class="section-lede">Eider reads a <em>source</em>, a JSON file at a web address that lists apps, downloads the decrypted <code>.ipa</code> archives it points to, and installs each one so it opens like any other app on your Mac. It comes in three parts that share one engine where they can.</p>
+    <div class="grid">
+      <a class="card" href="mac.html">
+        <h3>Eider for Mac</h3>
+        <p>A SwiftUI app laid out like the Mac App Store: Library, Updates, Browse, Activity and Sources.</p>
+      </a>
+      <a class="card" href="cli.html">
+        <h3>The <code>eider</code> command</h3>
+        <p>Sources, search, install, update, diagnostics and interface size from the terminal, with JSON output for scripts. It ships inside the app bundle.</p>
+      </a>
+      <a class="card" href="ios.html">
+        <h3>Eider for iOS <span class="tag">In development</span></h3>
+        <p>The same sources and browsing on iPhone and iPad, with a Certificates section for your own signing identities and installation on the device itself.</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="wrap" style="padding-top:3rem;padding-bottom:1rem">
+  <h2 class="section-title">The app</h2>
+  <p class="section-lede">Screenshots drawn by the app's own <code>--snapshot</code> mode against a test source with made-up apps.</p>
+  <div class="shots">
+    <figure><img src="images/library.png" width="1100" height="720" alt="Library: an installed app with an update available" loading="lazy"><figcaption>Library: what you installed, with updates marked.</figcaption></figure>
+    <figure><img src="images/updates.png" width="1100" height="720" alt="Updates: the installed app's newer version, with its source, date and size" loading="lazy"><figcaption>Updates: newer versions with source, date and size.</figcaption></figure>
+    <figure><img src="images/browse.png" width="1100" height="720" alt="Browse: a source's apps and an app's product page" loading="lazy"><figcaption>Browse: a source's apps and a product page.</figcaption></figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2 class="section-title">Features</h2>
+    <p class="section-lede">Every feature has a section on its page. Nothing here is claimed that the documentation does not support, and the pages say what is still unverified.</p>
+    <div class="grid">
+      <a class="card" href="sources.html#formats"><h3>Sources</h3><p>AltStore format and PlayCover-style lists, import and export, refresh, warnings, a strict URL policy and a 64 MB size cap.</p></a>
+      <a class="card" href="sources.html#browse"><h3>Browse and search</h3><p>One row per app: entries with the same bundle id and name merge, with every version kept.</p></a>
+      <a class="card" href="sources.html#app-detail"><h3>App detail and versions</h3><p>Screenshots, What's New, information and a version history to install from.</p></a>
+      <a class="card" href="sources.html#downloads"><h3>Downloads</h3><p>Resumable, size-capped, checked against a published SHA-256 and the first hash an address served.</p></a>
+      <a class="card" href="mac.html#install"><h3>Install on Mac</h3><p>Mach-O conversion to Mac Catalyst, ad hoc signing and a sandbox entitlement set. No Xcode needed.</p></a>
+      <a class="card" href="mac.html#shims"><h3>Compatibility shims</h3><p>Keychain, app groups, OpenGL ES, CallKit and camera fixes, plus a per-app quirks table.</p></a>
+      <a class="card" href="mac.html#interface-size"><h3>Interface Size</h3><p>iPad apps draw at 77% on a Mac. Pick Auto, 85%, 100%, 115% or the Mac idiom, no reinstall.</p></a>
+      <a class="card" href="mac.html#library"><h3>Library</h3><p>An icon grid of installed apps with Open, Update, Diagnose, Show in Finder and Uninstall.</p></a>
+      <a class="card" href="mac.html#updates"><h3>Updates and Update All</h3><p>Matched to the entry an app was installed from, with a sidebar and Dock badge count.</p></a>
+      <a class="card" href="mac.html#doctor"><h3>Launch diagnostics</h3><p><code>eider doctor</code> launches an app and, if it dies, says why with a stable code.</p></a>
+      <a class="card" href="ios.html#certificates"><h3>Certificates (iOS)</h3><p>Your own development, ad hoc or enterprise certificate, kept with its password in the Keychain.</p></a>
+      <a class="card" href="ios.html#install-methods"><h3>Install on device (iOS)</h3><p>Sign with your certificate and install through a manifest server you run, or a pairing mode in development.</p></a>
+      <a class="card" href="security.html"><h3>Security model</h3><p>Sources and IPAs are untrusted. Encrypted IPAs are refused. Nothing from an IPA runs at install time.</p></a>
+      <a class="card" href="security.html#privacy"><h3>Privacy</h3><p>No analytics or telemetry code. State stays on your machine.</p></a>
+    </div>
+  </div>
+</section>
+
+<section class="wrap" style="padding-top:3rem;padding-bottom:1rem">
+  <div class="prose" style="max-width:none">
+  <h2 class="section-title" id="install" style="border:0;margin:0 0 .75rem;padding:0">Install</h2>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(20rem,1fr))">
+    <div>
+      <h3>Homebrew</h3>
+<pre><code>brew tap ayush5harma/eider {{repo}}
+brew install --cask eider</code></pre>
+      <p>The cask installs <code>Eider.app</code> and links the <code>eider</code> command onto your PATH.</p>
+    </div>
+    <div>
+      <h3>Download</h3>
+      <p>Take <a href="{{zip_url}}"><code>Eider-{{version}}.zip</code></a> from the <a href="{{release_url}}">release page</a> and move <code>Eider.app</code> to <code>/Applications</code>. The command is at <code>Eider.app/Contents/Resources/cli/bin/eider</code>. There is also a <a href="{{tar_url}}">command-line tarball</a>.</p>
+    </div>
+  </div>
+  <div class="note">
+    <p><strong>First launch.</strong> Eider is ad hoc signed, not notarized. Open it once and approve it in System Settings &gt; Privacy &amp; Security.</p>
+  </div>
+  <p>Every release so far is marked pre-release on GitHub, so there is no &ldquo;latest release&rdquo; shortcut; the <a href="{{releases_url}}">releases page</a> lists them all with what was and was not checked in each.</p>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2 class="section-title">Status and honesty</h2>
+    <div class="prose" style="max-width:none">
+    <div class="warn">
+      <p><strong>Early software.</strong> Version {{version}} is a pre-release. Expect rough edges, and read <a href="faq.html#limitations">limitations and known issues</a> before installing anything you depend on.</p>
+    </div>
+    <ul>
+      <li>Each release's notes say what was checked and what was not. The 0.1.7 notes, for example, say Update and Update All had not been run against a real app with a newer version, and the later notes do not report that gap closed.</li>
+      <li>Eider for iOS is not released as an app. Its on-device install has been proved on one iPhone with a hand-written manifest; the whole flow with the manifest server set inside the app is still to be run. The pairing method is not in the build yet. See <a href="ios.html#status">its status</a>.</li>
+      <li>Eider ships no sources and decrypts nothing. Use it only with apps you have the right to run. See <a href="security.html#stance">the no-piracy stance</a>.</li>
+    </ul>
+    </div>
+  </div>
+</section>

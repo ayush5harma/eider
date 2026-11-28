@@ -24,3 +24,5 @@ DerivedData/
 
 # Agent worktrees
 .claude/worktrees/
+# Built GitHub Pages site (site/build.py)
+site/dist/

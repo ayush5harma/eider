@@ -1,0 +1,125 @@
+title: Sources, browsing and downloads
+description: How Eider reads AltStore and PlayCover style sources, merges entries, ranks versions, checks URLs and checksums, imports and exports your list, and downloads IPAs.
+---
+<h1>Sources, browsing and downloads</h1>
+<p class="lede">A source is a JSON file at a web address. Eider reads it, lists the apps in it and downloads the IPAs it points to. Eider ships no sources: you add the ones you trust.</p>
+
+<div class="note"><p>Eider does not decrypt anything. A source must only list IPAs you have the right to distribute.</p></div>
+
+<h2 id="formats">Source formats</h2>
+<p>Two formats are accepted.</p>
+
+<h3>AltStore format</h3>
+<p>An object with an <code>apps</code> array. Fields Eider reads:</p>
+<ul>
+  <li><strong>Source:</strong> <code>name</code>, <code>identifier</code>, <code>subtitle</code>, <code>description</code>, <code>iconURL</code>, <code>headerURL</code>, <code>website</code>, <code>tintColor</code>, <code>news</code>.</li>
+  <li><strong>App:</strong> <code>name</code> and <code>bundleIdentifier</code> (both required), <code>developerName</code>, <code>subtitle</code>, <code>localizedDescription</code>, <code>iconURL</code>, <code>tintColor</code>, <code>category</code>, <code>screenshots</code>, <code>versions</code>.</li>
+  <li><strong>Version</strong> (each entry of <code>versions</code>): <code>version</code> and <code>downloadURL</code> (both required), <code>buildVersion</code>, <code>date</code>, <code>localizedDescription</code>, <code>size</code>, <code>minOSVersion</code>, <code>maxOSVersion</code>, and the optional <code>sha256</code>.</li>
+</ul>
+<p>Older sources put <code>version</code>, <code>versionDate</code>, <code>versionDescription</code>, <code>downloadURL</code> and <code>size</code> directly on the app. Eider reads that flat form when an app has no usable <code>versions</code>.</p>
+<p>Dates are read fastest as <code>2026-01-15</code> (midnight UTC) or <code>2026-01-15T09:30:00Z</code>; milliseconds and a <code>+05:30</code> offset are fine. A zone-less timestamp, a space instead of the <code>T</code> or a <code>+0530</code> offset are accepted too, just more slowly.</p>
+<pre><code>{
+  "name": "Example Source",
+  "identifier": "com.example.source",
+  "apps": [
+    {
+      "name": "Example",
+      "bundleIdentifier": "com.example.app",
+      "versions": [
+        {
+          "version": "1.2.0",
+          "date": "2026-01-15",
+          "downloadURL": "https://example.com/Example-1.2.0.ipa",
+          "size": 12345678,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+<h3>PlayCover-style list</h3>
+<p>A JSON array, or an object <code>{"name": ..., "data": [...]}</code>, of entries:</p>
+<pre><code>[
+  {
+    "bundleID": "com.example.app",
+    "name": "Example",
+    "version": "1.2.0",
+    "itunesLookup": "https://itunes.apple.com/lookup?bundleId=com.example.app",
+    "link": "https://example.com/Example-1.2.0.ipa",
+    "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+]</code></pre>
+<p><code>bundleID</code>, <code>name</code>, <code>version</code> and <code>link</code> are required. <code>itunesLookup</code> is accepted and never fetched. <code>checksum</code> is optional.</p>
+
+<h2 id="manage">Adding, refreshing and removing</h2>
+<ul>
+  <li><strong>Add</strong> a source from its https address, in the Sources page or with <code>eider source add &lt;url&gt;</code>. Adding prints how many entries the source listed.</li>
+  <li><strong>Refresh</strong> fetches a source again. In the app, sources not fetched in the last six hours are refreshed in the background when it opens, and Check for Updates (Command-R) refreshes on demand. On the command line, <code>eider source refresh</code> does every source, or one when you give its address.</li>
+  <li><strong>Remove</strong> a source with <code>eider source remove &lt;url&gt;</code>. Apps already installed from it stay installed.</li>
+  <li><strong>Warnings.</strong> An entry that breaks the rules below (a download URL that is not allowed, a bundle id longer than 255 bytes) is skipped with a warning and the rest of the source still loads. A <code>sha256</code> or <code>checksum</code> that is not 64 hex characters is ignored with a warning.</li>
+  <li><strong>Size cap.</strong> A source file may be at most 64 MB. The cap was raised from 20 MB after a source in real use was refused by it. A fetch fails after 30 seconds without a byte arriving, or after 15 minutes in all.</li>
+</ul>
+
+<h2 id="url-rules">URL policy</h2>
+<ul>
+  <li><code>https</code> only. <code>http</code> is accepted only for loopback hosts (<code>localhost</code>, <code>127.0.0.0/8</code>, <code>::1</code>, checked as real addresses, so <code>127.evil.example.com</code> is not one), and only for a source you added by a loopback address and the items inside it, for local testing. An https source cannot point at a loopback address, a redirect from https to loopback is refused, and a deep link never carries one.</li>
+  <li>A relative URL (for example <code>"downloadURL": "ipas/Example.ipa"</code>) resolves against the URL the source was fetched from.</li>
+  <li><code>file</code> URLs work only when the source itself was opened from a local file.</li>
+  <li>Redirects are held to the same rules.</li>
+</ul>
+
+<h2 id="checksums">Checksums</h2>
+<p><code>sha256</code> (AltStore format) and <code>checksum</code> (PlayCover list) are optional. When present and 64 hex characters, Eider compares the downloaded file against it and refuses a mismatch. Publish a SHA-256 whenever you can: it is the only integrity check a source can offer, and a source without one is not a verified source.</p>
+
+<h2 id="bundle-ids">Bundle ids</h2>
+<p>A source's <code>bundleIdentifier</code> (or <code>bundleID</code>) is the name Eider lists the app under and matches updates by. Control and invisible characters are removed. Use the id the IPA itself ships, though: Eider installs the app under the IPA's own <code>CFBundleIdentifier</code> and refuses an IPA whose id differs from the one the source lists. An id the IPA does not carry installs only when you pass the IPA's id with <code>--bundle-id</code> (the Bundle id field in the app).</p>
+
+<h2 id="browse">Browse, search and the merge rule</h2>
+<p>Browse lists the apps of all your sources, or one source at a time, with a search field. Search matches part of an app's name, bundle id, developer or subtitle; <code>eider search</code> does the same on the command line.</p>
+<figure><img src="images/browse.png" width="1100" height="720" alt="Browse: ten apps in a list on the left and the product page of IPA Probe on the right" loading="lazy"><figcaption>Browse, drawn against a test source: the list, and an app's product page with an Update badge.</figcaption></figure>
+<p>Some sources list the same app once per version (one with 17,444 entries lists &ldquo;1Blocker&rdquo; ten times). Eider merges entries that share a bundle id <strong>and</strong> a name within one source into a single app, when the source is read and again when a saved copy is loaded, so the list has one row per app. Names are compared trimmed, with runs of whitespace collapsed, ignoring case.</p>
+<ul>
+  <li><strong>Versions</strong> are the union of every entry's versions, newest first. The same version at the same download URL is listed once; the same version at another URL is kept as another download.</li>
+  <li><strong>Newest</strong> means the highest version number. A dotted number (&ldquo;1.10&rdquo;, &ldquo;v2.0&rdquo;, &ldquo;3.8.14 (5)&rdquo;) is compared component by component, so 1.10 is newer than 1.9 and 1.2 equals 1.2.0. A version that is not a number (&ldquo;8b6e503&rdquo;, &ldquo;nightly&rdquo;, &ldquo;beta&rdquo;) never outranks a numbered one, so a commit-hash build is not offered as an update to 3.8.14. Ties go to the build number, then the date, then the order in the source; dates decide last because sources date their versions unreliably.</li>
+  <li><strong>Name, developer, subtitle, description, icon, tint, category and screenshots</strong> come from the entry carrying the newest version; a field it leaves empty is taken from the first other entry that has one. Notes, size, date, sha256 and the download URL stay with their own version.</li>
+  <li><strong>Different names under one bundle id stay separate.</strong> Tweak sources ship many apps under the original app's bundle id: the 17,444-entry source lists 211 entries under YouTube's id as 152 apps. Eider 0.1.2 to 0.1.6 merged by bundle id alone and hid about 7,500 of that source's entries; 0.1.7 fixed it.</li>
+  <li><strong>Different sources are never merged.</strong> The same bundle id in two sources is two rows.</li>
+  <li>A row's id is <code>&lt;source url&gt;|&lt;bundle id&gt;</code> while the source lists one name under that bundle id, and <code>&lt;source url&gt;|&lt;bundle id&gt;|&lt;name&gt;</code> when it lists several. <code>eider install</code> and <code>eider info</code> take a bundle id or that full id. A bundle id that several apps of the first source listing it share is refused with the candidates (name, version, id) rather than guessed.</li>
+  <li>A saved source records the merge rule it was written under. Copies saved by 0.1.2 to 0.1.6 cannot be repaired, since the folded entries are gone, so the app refetches them at launch and <code>eider source list</code> tells you when one needs <code>eider source refresh</code>.</li>
+</ul>
+
+<h2 id="app-detail">App detail and version history</h2>
+<p>Each app has a product page modelled on the Mac App Store: a large header with a capsule Install button, an info strip (version, size, developer, source), screenshots, What's New with the release notes and date of the newest version, an Information table (source, developer, version and build, size, identifier) and the version history. You can install any listed version, not only the newest; on the command line that is <code>eider install &lt;bundle-id&gt; --version 1.2.0</code>. <code>eider info &lt;bundle-id&gt;</code> prints what the sources offer and whether the app is installed.</p>
+
+<h2 id="downloads">Downloads</h2>
+<ul>
+  <li>Files go to Eider's own Downloads folder through a <code>.part</code> file, over https, under an 8 GB cap that counts bytes actually written.</li>
+  <li>The download is checked against the SHA-256 the source published and against the first hash that address ever served, so a file that changes silently at the same address is caught.</li>
+  <li>A download resumes only against the same address and version. Cancelling keeps the <code>.part</code> file.</li>
+  <li>In the app, the Activity page shows downloads and installs, one progress ring each. Update All runs one app at a time through Activity.</li>
+  <li>Installing from a file or from an https address of an IPA works too: <code>eider install ~/Downloads/App.ipa</code>, or drop the <code>.ipa</code> on the app window.</li>
+</ul>
+
+<h2 id="import-export">Import and export</h2>
+<p>The Sources page has an Import and Export menu: Import Sources, Import from Clipboard, Export Sources and Copy All Source URLs. The command line has <code>eider source export</code> and <code>eider source import</code>.</p>
+<ul>
+  <li><strong>Export</strong> writes Eider JSON (the default) or one address per line (a name ending in <code>.txt</code> in the app, <code>--format text</code> on the command line). The JSON file is <code>{"format": "eider-sources", "version": 1, "exported": "&lt;ISO 8601&gt;", "sources": [{"url": "...", "name": "..."}]}</code>; the name is for people and is ignored on import.</li>
+  <li><strong>Import</strong> accepts that file, a JSON array of addresses, a JSON array of objects with a <code>url</code>, or plain text with one address per line (blank lines and lines starting with <code>#</code> are skipped). A line may also be an <code>eider://source/&lt;url&gt;</code> link. The file may be at most 1 MB and list at most 500 addresses.</li>
+  <li>Every address is held to the deep-link rules: a list is somebody else's words, so <code>file</code> URLs and loopback addresses are rejected (add those by hand). A rejected address is reported with its reason, not dropped. Addresses already added, or listed twice, are skipped.</li>
+  <li>New addresses are fetched at most four at a time. One failing does not stop the rest, and the summary lists it, for example &ldquo;Added 3 &middot; 2 already added &middot; 1 rejected &middot; 1 failed&rdquo;. <code>eider source import</code> exits with status 2 when any address was rejected or failed; <code>--json</code> carries the full result.</li>
+</ul>
+
+<h2 id="deep-links">Deep links</h2>
+<ul>
+  <li><code>eider://source/&lt;url&gt;</code> adds the source at <code>&lt;url&gt;</code>.</li>
+  <li><code>eider://install/&lt;url&gt;</code> starts an install of the IPA at <code>&lt;url&gt;</code>.</li>
+</ul>
+<p>A deep link always asks before it does anything. <code>&lt;url&gt;</code> follows the URL policy, except that <code>file</code> URLs and loopback addresses are never accepted from a link. Percent-encode it if it carries a query string you want kept.</p>
+
+<h2 id="installable">What makes an IPA installable</h2>
+<ul>
+  <li>It must be <strong>decrypted</strong>. Binaries still encrypted with FairPlay are refused; Eider cannot and does not decrypt them.</li>
+  <li>Its main executable must contain an <strong>arm64</strong> slice. An x86_64-only or simulator-only build will not install.</li>
+</ul>
+<p>Apps that depend on iOS-only hardware or services may install and still not work. The <a href="{{repo}}/issues/new/choose">app compatibility issue template</a> collects what is needed to investigate.</p>

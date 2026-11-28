@@ -1,0 +1,125 @@
+title: The eider command line
+description: Every eider command with its options and examples: source, search, info, install, list, update, open, doctor, scale and uninstall, plus JSON output and exit codes.
+---
+<h1>The <code>eider</code> command line</h1>
+<p class="lede">Sources, search, install, update, launch checks and interface size are all available from the terminal. <code>eider --help</code> lists the commands and <code>eider help &lt;command&gt;</code> explains each.</p>
+
+<h2 id="basics">Basics</h2>
+<p>The command ships inside the app bundle at <code>Eider.app/Contents/Resources/cli/bin/eider</code>; the Homebrew cask links it onto your PATH. There is also a command-line tarball on each <a href="{{releases_url}}">release</a>. <code>eider --version</code> prints the version.</p>
+<ul>
+  <li><strong>JSON output.</strong> Every command takes <code>--json</code>: one JSON object per line, and the last line is the result.</li>
+  <li><strong>Exit codes.</strong> 0 success, 1 usage error, 2 failure. <code>source import</code> also exits 2 when any address was rejected or failed, after adding the rest.</li>
+  <li><strong>Errors</strong> carry a stable code and a sentence you can act on.</li>
+  <li><strong>State</strong> lives in Eider's own folder under <code>~/Library/Application Support/Eider</code>. Set <code>EIDER_HOME</code> to use another folder, for tests and scripts.</li>
+</ul>
+
+<h2 id="overview">All commands</h2>
+<table>
+  <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><a href="#source"><code>eider source</code></a></td><td>Add, list, remove, refresh, import and export sources.</td></tr>
+    <tr><td><a href="#search"><code>eider search</code></a></td><td>Find apps in your sources (all of them without a term).</td></tr>
+    <tr><td><a href="#info"><code>eider info</code></a></td><td>Show what a source offers for an app, and whether it is installed.</td></tr>
+    <tr><td><a href="#install-cmd"><code>eider install</code></a></td><td>Install an app from a decrypted .ipa, an https address or a source, as a Mac app.</td></tr>
+    <tr><td><a href="#list"><code>eider list</code></a></td><td>List installed apps and mark those with an update.</td></tr>
+    <tr><td><a href="#update"><code>eider update</code></a></td><td>Reinstall the newest version of an app, keeping its data.</td></tr>
+    <tr><td><a href="#uninstall"><code>eider uninstall</code></a></td><td>Move an installed app to the Trash and forget it.</td></tr>
+    <tr><td><a href="#open"><code>eider open</code></a></td><td>Open an installed app in the background and confirm it stays running.</td></tr>
+    <tr><td><a href="#scale"><code>eider scale</code></a></td><td>Show or set how large an installed app draws.</td></tr>
+    <tr><td><a href="#doctor-cmd"><code>eider doctor</code></a></td><td>Launch an installed app and, if it does not stay up, say why.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="quick">A quick tour</h2>
+<pre><code>eider source add https://example.com/source.json   <span class="cmt"># add a source</span>
+eider source list                                  <span class="cmt"># sources you added</span>
+eider source refresh                               <span class="cmt"># fetch them all again</span>
+eider source export -o sources.json                <span class="cmt"># save your list of sources</span>
+eider source import sources.json                   <span class="cmt"># add the sources in a file (- reads stdin)</span>
+eider search camera                                <span class="cmt"># find an app</span>
+eider info com.example.app                         <span class="cmt"># what the sources offer</span>
+eider install com.example.app                      <span class="cmt"># newest version, from a source</span>
+eider install com.example.app --version 1.2.0
+eider install ~/Downloads/App.ipa                  <span class="cmt"># a file, or an https address</span>
+eider list                                         <span class="cmt"># installed apps, updates marked</span>
+eider update --all                                 <span class="cmt"># or: eider update &lt;bundle-id&gt;</span>
+eider open com.example.app                         <span class="cmt"># launch and confirm it stays up</span>
+eider doctor com.example.app                       <span class="cmt"># launch; if it dies, say why</span>
+eider doctor com.example.app --settle 15           <span class="cmt"># an app that fails late</span>
+eider scale com.example.app 115                    <span class="cmt"># interface size; no reinstall</span>
+eider scale --all auto                             <span class="cmt"># every installed app on Auto</span>
+eider uninstall com.example.app --remove-data      <span class="cmt"># to the Trash</span></code></pre>
+
+<h2 id="source"><code>eider source</code></h2>
+<p>Add, list, remove, refresh, import and export sources. See <a href="sources.html">Sources</a> for the formats and rules.</p>
+<dl>
+  <dt><code>eider source add &lt;url&gt;</code></dt>
+  <dd>Add a source from the https address of its file. Prints how many entries it listed.</dd>
+  <dt><code>eider source list</code></dt>
+  <dd>List the sources you have added. Says when a source needs a refresh because it was saved under an older merge rule.</dd>
+  <dt><code>eider source remove &lt;url&gt;</code></dt>
+  <dd>Remove a source, by the address it was added with. Apps installed from it stay installed.</dd>
+  <dt><code>eider source refresh [&lt;url&gt;]</code></dt>
+  <dd>Fetch a source again; every source when no address is given.</dd>
+  <dt><code>eider source export [--format json|text] [-o &lt;file&gt;]</code></dt>
+  <dd>Write the sources you have added as a file you can import elsewhere. JSON is the Eider sources file (the default); text is one address per line. Output goes to stdout unless <code>--output</code> is given.</dd>
+  <dt><code>eider source import &lt;file&gt;</code></dt>
+  <dd>Add the sources listed in a file, or <code>-</code> for standard input. It reads an Eider sources file, a JSON array of addresses, or plain text with one address per line (<code>#</code> starts a comment). Addresses already added are skipped. Exits with status 2 when any address was rejected or failed, after adding the rest.</dd>
+</dl>
+
+<h2 id="search"><code>eider search</code></h2>
+<pre><code>eider search [&lt;term&gt;] [--json]</code></pre>
+<p>Find apps in your sources; with no term, all of them. The term is part of an app's name, bundle id, developer or subtitle. With <code>--json</code> each result carries the full entry id you need when several apps share a bundle id.</p>
+
+<h2 id="info"><code>eider info</code></h2>
+<pre><code>eider info &lt;bundle-id&gt; [--json]</code></pre>
+<p>Show what a source offers for an app, and whether it is installed. The argument is the bundle id, or the full entry id when several apps share the bundle id; in that case the command lists the candidates rather than guessing.</p>
+
+<h2 id="install-cmd"><code>eider install</code></h2>
+<pre><code>eider install [&lt;options&gt;] &lt;target&gt;</code></pre>
+<p>The target is a <code>.ipa</code> file, an https address of one, the bundle id of an app in your sources, or its full entry id when several share the bundle id. The argument is treated as a file or address only when it contains a slash or ends in <code>.ipa</code>; otherwise it is a bundle id.</p>
+<table>
+  <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--version &lt;version&gt;</code></td><td>Install this version (bundle id installs only; default is the newest).</td></tr>
+    <tr><td><code>--dest &lt;folder&gt;</code></td><td>Install into this folder instead of <code>/Applications</code>.</td></tr>
+    <tr><td><code>--interface-size &lt;size&gt;</code></td><td>How large the app draws: <code>auto</code> (default), <code>77</code> (iPad), <code>85</code>, <code>100</code>, <code>115</code> or <code>mac</code> (Mac idiom). Change it later with <code>eider scale</code>.</td></tr>
+    <tr><td><code>--mac-idiom</code></td><td>Render in the Mac idiom (1:1 with the display).</td></tr>
+    <tr><td><code>--no-keychain</code></td><td>No emulated keychain: logins will not survive a relaunch.</td></tr>
+    <tr><td><code>--dylib &lt;file&gt;</code></td><td>Also link this prebuilt <code>.dylib</code> into the app. Repeatable.</td></tr>
+    <tr><td><code>--name &lt;name&gt;</code></td><td>Install under this name instead of the app's own.</td></tr>
+    <tr><td><code>--bundle-id &lt;id&gt;</code></td><td>Install under this bundle id instead of the app's own.</td></tr>
+    <tr><td><code>--remove-extensions</code></td><td>Drop app extensions, a common reason an app fails to sign or open.</td></tr>
+    <tr><td><code>--reset</code></td><td>Clear the app's saved data first. The app must be quit.</td></tr>
+    <tr><td><code>--force</code></td><td>Replace a same-named app even if its bundle id differs.</td></tr>
+    <tr><td><code>--json</code></td><td>One JSON object per line; the last is the result.</td></tr>
+  </tbody>
+</table>
+<pre><code>eider install com.example.app                       <span class="cmt"># newest version from your sources</span>
+eider install com.example.app --version 1.2.0
+eider install ~/Downloads/App.ipa --dest ~/Applications --interface-size 100
+eider install https://example.com/App.ipa --remove-extensions</code></pre>
+
+<h2 id="list"><code>eider list</code></h2>
+<pre><code>eider list [--json]</code></pre>
+<p>List installed apps and mark those with an update.</p>
+
+<h2 id="update"><code>eider update</code></h2>
+<pre><code>eider update [&lt;bundle-id&gt;] [--all] [--interface-size &lt;size&gt;] [--json]</code></pre>
+<p>Reinstall the newest version of an app, keeping its data. <code>--all</code> updates every app that has an update. <code>--interface-size</code> also sets how large the app draws; it is kept from the installed app otherwise.</p>
+
+<h2 id="uninstall"><code>eider uninstall</code></h2>
+<pre><code>eider uninstall &lt;bundle-id&gt; [--remove-data] [--json]</code></pre>
+<p>Move an installed app to the Trash and forget it. <code>--remove-data</code> also moves the app's data container to the Trash.</p>
+
+<h2 id="open"><code>eider open</code></h2>
+<pre><code>eider open &lt;bundle-id&gt; [--timeout &lt;seconds&gt;] [--settle &lt;seconds&gt;] [--json]</code></pre>
+<p>Open an installed app in the background and confirm it stays running. <code>--timeout</code> is how long to wait for the app to come up (default 20); <code>--settle</code> is how long it must stay up to count as running (default 8; must be less than <code>--timeout</code>).</p>
+
+<h2 id="scale"><code>eider scale</code></h2>
+<pre><code>eider scale [&lt;bundle-id&gt;] [&lt;size&gt;] [--all] [--json]</code></pre>
+<p>Show or set how large an installed app draws. iPad apps draw at 77% on the Mac; Auto is 100% on the built-in display and a little more on a desk display. The app picks a change up when it next opens: no reinstall. Leave out the size to show the current one. With <code>--all</code>, the size is set on every installed app. See <a href="mac.html#interface-size">Interface Size</a>.</p>
+
+<h2 id="doctor-cmd"><code>eider doctor</code></h2>
+<pre><code>eider doctor &lt;bundle-id&gt; [--timeout &lt;seconds&gt;] [--settle &lt;seconds&gt;] [--json]</code></pre>
+<p>Launch an installed app and, if it does not stay up, say why, with a stable diagnosis code. Same options as <code>open</code>. The codes are explained under <a href="mac.html#doctor">launch diagnostics</a>.</p>

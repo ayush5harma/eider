@@ -1,0 +1,195 @@
+title: Eider for iOS
+description: Eider on iPhone and iPad: sources and browsing, a Certificates section for your own signing identities, on-device signing, and installing on the device itself through a manifest server or a pairing mode. Status, measured iOS 27 rules and what is not yet verified.
+---
+<h1>Eider for iOS <span class="tag">In development</span></h1>
+<p class="lede">The Mac app's sources, browsing, versions, downloads, library and updates on iPhone and iPad, plus two things only the device needs: a Certificates section for your own signing certificates, and an Install step that signs an IPA with one of them and installs it on the same device.</p>
+
+<h2 id="status">Status</h2>
+<div class="warn">
+  <p><strong>Not released as an app.</strong> There is no iOS build on the releases page. You build it from source with Xcode and your own signing identity (see <a href="build.html#ios">building from source</a>). The app is at version 0.2.0 in its project file; iOS 17 is the minimum, and Liquid Glass is used on iOS 26 and later, with fallbacks.</p>
+</div>
+<p>What has and has not been proved, as the project documents record it:</p>
+<ul>
+  <li><strong>Proved (2026-11-28, iPhone 17 Pro, iOS 27.3):</strong> an <code>itms-services</code> install succeeds when the HTTPS server's certificate chains to a root you installed as a profile and turned on in Certificate Trust Settings, even when that root is name-constrained. Later the same day, an app signed on the phone by Eider with a development certificate installed and launched, using a hand-written manifest served from a Mac and the IPA served by Eider on the iPhone.</li>
+  <li><strong>Not yet run:</strong> the whole flow with the manifest server set inside the app on the device. The parts are tested on the Mac, where the Mac's own LAN address stands in for the iPhone's.</li>
+  <li><strong>Not yet verified:</strong> Safari taking a loopback profile URL for the root profile on the device; signing and repack timings on the device (on the Mac, a 99.8 MB IPA packed in 0.39 s and unpacked in 0.5 s in a debug build).</li>
+  <li><strong>Not in the build yet:</strong> the library behind the Pairing (fully local) method. Its screens and settings exist, but the pairing service is a placeholder that says &ldquo;Pairing install is not in this build yet.&rdquo;</li>
+  <li><strong>Out of scope for now:</strong> the Mac-only engine features (Catalyst conversion, shims, Interface Size, diagnostics of launched apps) and tweak injection.</li>
+</ul>
+
+<h2 id="features">What it does</h2>
+<ul>
+  <li><strong>Sources.</strong> Add, remove, refresh, import and export, with the same formats, URL policy and 64 MB cap as the Mac app. See <a href="sources.html">Sources</a>.</li>
+  <li><strong>Browse and search.</strong> The same merge rule (same bundle id and same normalised name). App detail shows the Version History.</li>
+  <li><strong>Downloads.</strong> Resumable, with hashes checked as on the Mac.</li>
+  <li><strong>Library.</strong> IPAs you downloaded or imported (from the Files app, the share sheet or &ldquo;Open in&rdquo;), and the apps Eider signed and installed, each with its origin entry so Updates can follow it.</li>
+  <li><strong>Updates.</strong> The origin entry first, then the same bundle id across sources only when that id has a single name. A tab badge, as on the Mac.</li>
+  <li><strong>Certificates</strong>, <strong>signing options</strong> and <strong>install on this device</strong>, below.</li>
+</ul>
+
+<h2 id="certificates">Certificates</h2>
+<p>The Certificates section holds your own signing identities, development, ad hoc or enterprise, as Feather's does. Eider supplies none and cannot make one for you.</p>
+<ul>
+  <li>Each certificate is one <code>.p12</code>, its password and one <code>.mobileprovision</code>, added together. The files are checked when you add them: a wrong password or a profile that does not match the certificate is refused then, not at install time.</li>
+  <li>Shown for each: name, team, type (development, ad hoc, enterprise), expiry, whether this device is in the profile, and revocation status from Apple's OCSP responder. A revoked certificate is flagged: apps signed with it will not open.</li>
+  <li>The password lives in the Keychain on this device only, never in a plist, file or database.</li>
+  <li>One certificate is the default; installs sign with it unless you pick another.</li>
+  <li>Never commit a certificate, profile, <code>.p12</code> or password to a repository. Eider's own project keeps its signing values out of the committed project for that reason.</li>
+</ul>
+
+<h2 id="signing">Signing</h2>
+<p>Signing runs on the device in <code>EiderSign</code>: the vendored zsign sources (MIT) built against OpenSSL, behind a small Swift API. Options, all off or unchanged by default:</p>
+<table>
+  <thead><tr><th>Option</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td>Bundle id</td><td>Replaces the app's bundle identifier. In nested apps and extensions the old identifier is replaced wherever it appears (<code>com.old.widget</code> becomes <code>com.new.widget</code>).</td></tr>
+    <tr><td>Display name</td><td>Sets <code>CFBundleDisplayName</code> and <code>CFBundleName</code>.</td></tr>
+    <tr><td>Version</td><td>Sets <code>CFBundleVersion</code> and <code>CFBundleShortVersionString</code>.</td></tr>
+    <tr><td>Remove Supported Devices</td><td>Removes <code>UISupportedDevices</code>, which limits an app to listed device models.</td></tr>
+    <tr><td>Enable File Sharing</td><td>Sets <code>UIFileSharingEnabled</code> and <code>UISupportsDocumentBrowser</code>, so the app's Documents folder shows in the Files app.</td></tr>
+    <tr><td>Remove URL Schemes</td><td>Removes <code>CFBundleURLTypes</code>, so the app claims no URL schemes.</td></tr>
+  </tbody>
+</table>
+<p>Between download and install, Eider unpacks the IPA, signs <code>Payload/&lt;name&gt;.app</code> and repacks it uncompressed, keeping permissions and symlinks. Entries with absolute paths, <code>..</code> or symlinks out of the work directory are refused.</p>
+
+<h2 id="install-methods">Installing on the device itself</h2>
+<p>iOS installs an app from an <code>itms-services://?action=download-manifest&amp;url=&lt;https manifest&gt;</code> link. Eider offers two methods, chosen in Settings. The manifest server is the default.</p>
+
+<h3 id="manifest-rule">The measured iOS 27 rule: the manifest must be external</h3>
+<p>Measured on 2026-11-28 on an iPhone running iOS 27.3: the device's installation daemon, <code>appstored</code>, refuses a manifest URL that points at the iPhone itself, before it connects at all, at loopback (<code>https://127.0.0.1:...</code>) and at the iPhone's own Wi-Fi address alike. The device log:</p>
+<pre><code>appstored: &lt;ERROR&gt; The manifest URL isn't external: https://127.0.0.1:62744/&lt;token&gt;/manifest.plist
+appstored: &lt;ERROR&gt; Could not load download manifest with underlying error: Error Domain=ASDErrorDomain Code=850 "Invalid manifest URL" ... "The manifest URL isn't external"</code></pre>
+<p>It does accept a manifest served by another host whose asset URL points back at the iPhone. So the rule is: <strong>the manifest URL must be external to the device; the asset (IPA) URL in it need not be.</strong> Feather moved to an external manifest host for the same reason. Eider therefore serves only the IPA, from the iPhone's own Wi-Fi or LAN address (never loopback), answered only to the iPhone itself, and takes the manifest from a manifest server you run on another computer.</p>
+
+<h3 id="manifest-server">Method 1: a manifest server</h3>
+<p>An HTTPS endpoint on another host, set once in Settings under Install on this iPhone as a base URL such as <code>https://&lt;host&gt;/eider/manifest/&lt;secret&gt;.plist</code>. The path carries a secret, so the app keeps the URL in the Keychain (this device only, after first unlock) and shows it masked, with Paste, Save, Edit and Clear. Eider refuses a base that is not https, has a fragment, or names this iPhone, since <code>appstored</code> would refuse it. Its certificate must be trusted by the iPhone: a public one, or a root you installed and trusted.</p>
+<p>The app's setup lists three steps in order: 1) add the manifest server, 2) install Eider's certificate (the profile), 3) trust it; then Check Again. Ready means all three are in place.</p>
+
+<h4 id="manifest-endpoint">The self-hostable manifest endpoint</h4>
+<p>For each install Eider opens:</p>
+<pre><code>itms-services://?action=download-manifest&amp;url=&lt;percent-encoded manifest URL&gt;
+manifest URL = &lt;base&gt;?bundle=&lt;id&gt;&amp;version=&lt;v&gt;&amp;title=&lt;t&gt;&amp;url=&lt;ipa url&gt;
+ipa url      = https://&lt;wifi ip&gt;:&lt;port&gt;/&lt;32 lowercase hex token&gt;/app.ipa</code></pre>
+<p>Each query value is percent-encoded (RFC 3986 unreserved characters only), and <code>&amp;</code> replaces <code>?</code> when the base already has a query. The server answers with the usual manifest property list: one item, one <code>software-package</code> asset whose url is the <code>url</code> parameter, and metadata <code>bundle-identifier</code>, <code>bundle-version</code>, <code>kind</code> = <code>software</code> and <code>title</code>:</p>
+<pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;items&lt;/key&gt;
+  &lt;array&gt;
+    &lt;dict&gt;
+      &lt;key&gt;assets&lt;/key&gt;
+      &lt;array&gt;
+        &lt;dict&gt;
+          &lt;key&gt;kind&lt;/key&gt;&lt;string&gt;software-package&lt;/string&gt;
+          &lt;key&gt;url&lt;/key&gt;&lt;string&gt;<em>the url parameter</em>&lt;/string&gt;
+        &lt;/dict&gt;
+      &lt;/array&gt;
+      &lt;key&gt;metadata&lt;/key&gt;
+      &lt;dict&gt;
+        &lt;key&gt;bundle-identifier&lt;/key&gt;&lt;string&gt;<em>bundle</em>&lt;/string&gt;
+        &lt;key&gt;bundle-version&lt;/key&gt;&lt;string&gt;<em>version</em>&lt;/string&gt;
+        &lt;key&gt;kind&lt;/key&gt;&lt;string&gt;software&lt;/string&gt;
+        &lt;key&gt;title&lt;/key&gt;&lt;string&gt;<em>title</em>&lt;/string&gt;
+      &lt;/dict&gt;
+    &lt;/dict&gt;
+  &lt;/array&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;</code></pre>
+<p>The manifest server needs no copy of the IPA. It may refuse anything but an IPA URL of exactly that shape on a private address: Eider's own URLs always have it.</p>
+<p><strong>Readiness check.</strong> Eider first asks the manifest server with a GET of the base and a made-up but valid-looking query (<code>bundle=dev.eider.reachability-check</code> and an IPA URL of the right shape). A 200 or 400 counts as answering; any other status (a wrong secret gives 404 on most servers) or no connection shows as &ldquo;Manifest Server Not Answering&rdquo;.</p>
+<details>
+  <summary>An example server (not part of Eider)</summary>
+  <p>A minimal sketch of such an endpoint in Python's standard library. It listens on plain HTTP on the loopback interface, so put a TLS-terminating reverse proxy with a certificate your iPhone trusts in front of it. Replace the secret path. The plist output was checked; an install through this exact script was not run.</p>
+<pre><code>#!/usr/bin/env python3
+import ipaddress, plistlib, re
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlsplit
+
+SECRET_PATH = "/eider/manifest/CHANGE-ME.plist"
+PRIVATE = [ipaddress.ip_network(n) for n in
+           ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")]
+TOKEN_PATH = re.compile(r"/[0-9a-f]{32}/app\.ipa")
+
+
+def valid_ipa_url(url):
+    parts = urlsplit(url)
+    try:
+        ip = ipaddress.ip_address(parts.hostname or "")
+    except ValueError:
+        return False
+    return (parts.scheme == "https" and any(ip in n for n in PRIVATE)
+            and TOKEN_PATH.fullmatch(parts.path) is not None)
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parts = urlsplit(self.path)
+        query = {k: v[0] for k, v in parse_qs(parts.query).items()}
+        if parts.path != SECRET_PATH:
+            return self.reply(404, b"")
+        if not all(k in query for k in ("bundle", "version", "title", "url")) \
+                or not valid_ipa_url(query["url"]):
+            return self.reply(400, b"")
+        manifest = {"items": [{
+            "assets": [{"kind": "software-package", "url": query["url"]}],
+            "metadata": {"bundle-identifier": query["bundle"],
+                         "bundle-version": query["version"],
+                         "kind": "software", "title": query["title"]},
+        }]}
+        self.reply(200, plistlib.dumps(manifest, fmt=plistlib.FMT_XML))
+
+    def reply(self, status, body):
+        self.send_response(status)
+        self.send_header("Content-Type", "text/xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()</code></pre>
+</details>
+
+<h4 id="local-trust">Trust: a name-constrained local root</h4>
+<p>The IPA is served from the iPhone over HTTPS, which needs a certificate the device trusts. Feather's fully local mode used a public wildcard certificate whose private key had been published; it was revoked for key compromise and the service closed on 2026-09-04. <strong>Eider does not ship or download anyone's published private key.</strong> Instead, built in <code>EiderInstall</code>:</p>
+<ol>
+  <li><strong>Root.</strong> On first use Eider creates a P-256 key in the Keychain (this device only, never exported) and a self-signed root named &ldquo;Eider Local Install (&lt;8 hex chars&gt;)&rdquo;. The root is a CA with path length 0 and a <em>critical name constraint</em> permitting only IP <code>127.0.0.1/32</code>, <code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>, <code>100.64.0.0/10</code> and DNS <code>localhost</code>. Even a leaked key could not vouch for a public site.</li>
+  <li><strong>Trust, once.</strong> Eider serves the root as an unsigned <code>.mobileconfig</code> profile (display name &ldquo;Eider Local Install&rdquo;) from a plain-HTTP loopback listener, since Safari must fetch it before the root is trusted. You install the profile and turn on full trust in Settings &gt; General &gt; About &gt; Certificate Trust Settings. Setup reports not set up, needs Wi-Fi, needs trust, unreachable (most likely Local Network is off) or ready. Ready means the app's own HTTPS server was reached at the Wi-Fi address with the default system trust, the same address and trust <code>appstored</code> uses. That probe also raises iOS's Local Network prompt during setup rather than mid-install.</li>
+  <li><strong>Server certificate.</strong> A leaf issued by the root, with common name &ldquo;Eider local server&rdquo;, subject alternative names for <code>127.0.0.1</code>, the current Wi-Fi address and <code>localhost</code>, valid for 300 days (iOS refuses more than 825 for a user-trusted root), and re-issued when under 30 days remain, the root changed, or the Wi-Fi address is not covered. (A leaf whose subject CN looks like a host or IP fails the name constraints in OpenSSL, so the names go only in the alternative-name extension.)</li>
+  <li><strong>Install.</strong> Eider picks an up, non-loopback private IPv4 address (Wi-Fi first, then the hotspot bridge); without one it says to connect to Wi-Fi. It serves only <code>/&lt;token&gt;/app.ipa</code> (GET, HEAD, single byte ranges) on a random port with a random 128-bit token per install; anything else is a 404. Every connection whose remote address is not loopback or one of the iPhone's own addresses is cancelled before a byte is read, so nothing else on the Wi-Fi gets an answer. Eider then opens the <code>itms-services</code> link, keeps the app alive with a background task, reports &ldquo;handed to iOS&rdquo; once every byte was served, and stops the server 10 seconds later, or after 15 minutes without that.</li>
+</ol>
+<details>
+  <summary>Settings links measured on iOS 27.3</summary>
+  <p>The setup screens open Settings through the Settings URL scheme, trying candidates in order and logging which one opened. Measured on 2026-11-28 by opening each URL:</p>
+  <table>
+    <thead><tr><th>URL</th><th>Lands on</th></tr></thead>
+    <tbody>
+      <tr><td><code>prefs:root=General&amp;path=About/CERT_TRUST_SETTINGS</code></td><td>Certificate Trust Settings</td></tr>
+      <tr><td><code>settings-navigation://com.apple.Settings.General/About/CERT_TRUST_SETTINGS</code></td><td>Certificate Trust Settings</td></tr>
+      <tr><td><code>App-prefs:root=General&amp;path=About/CERT_TRUST_SETTINGS</code></td><td>the Apps page (wrong)</td></tr>
+      <tr><td><code>App-prefs:</code></td><td>the Settings root, with &ldquo;Profile Downloaded&rdquo; at the top after Safari downloaded a profile</td></tr>
+    </tbody>
+  </table>
+</details>
+
+<h3 id="pairing">Method 2: Pairing (fully local) <span class="tag">Not in the build yet</span></h3>
+<p>The second method needs no manifest server. It reaches the iPhone's own installation service through a loopback VPN, using a pairing file, and uploads the signed IPA to it directly. The screens and settings for it exist in the app; the library that performs the install is a placeholder, so choosing it today reports that it is not in this build.</p>
+<p>Setup, as the app lays it out:</p>
+<ol>
+  <li><strong>A pairing file</strong>, made once on a computer this iPhone trusts, and imported into Eider. It grants full access to the iPhone, so keep it private; Eider keeps it in the Keychain on this device only, never as a file.</li>
+  <li><strong>Get LocalDevVPN</strong>, a free app that loops the iPhone's traffic back to itself. It sends nothing anywhere else.</li>
+  <li><strong>Turn on LocalDevVPN</strong>: Eider opens it, it switches the VPN on and returns to Eider.</li>
+</ol>
+<p>Check Again asks the service, through the VPN, whether the pairing file is accepted. The build plan uses the MIT-licensed idevice library; a prebuilt framework for it is attached to the project's <a href="{{releases_url}}">releases</a> but is not yet wired into the app.</p>
+<p>The project's notes record open bug reports on iOS 27 against Feather's equivalent modes. Nothing about this method has been proved on a device yet.</p>
+
+<h2 id="architecture">How it is built</h2>
+<table>
+  <thead><tr><th>Target</th><th>Platforms</th><th>What it holds</th></tr></thead>
+  <tbody>
+    <tr><td><code>EiderCore</code></td><td>macOS, iOS</td><td>The platform-neutral half: catalog, downloads, update matching, version compare, paths, image cache, browse index, source list import and export. The Mac code re-exports it.</td></tr>
+    <tr><td><code>EiderSign</code></td><td>macOS, iOS</td><td>Signing: vendored zsign (MIT) against OpenSSL, plus certificate import and inspection (p12, mobileprovision, OCSP).</td></tr>
+    <tr><td><code>EiderInstall</code></td><td>macOS, iOS</td><td>Unpack and repack IPAs (ZIPFoundation, MIT), the device's own HTTPS server for the IPA, the manifest server URL, and the <code>itms-services</code> hand-off.</td></tr>
+    <tr><td><code>Apps/EiderMobile</code></td><td>iOS</td><td>The SwiftUI app, an Xcode project depending on the three libraries above.</td></tr>
+  </tbody>
+</table>
+<p>No code is taken from Feather, PlayCover or PlayTools (GPL and AGPL); Feather was read for approach only. See <a href="build.html#licences">licences</a>.</p>

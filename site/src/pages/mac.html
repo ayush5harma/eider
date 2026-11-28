@@ -1,0 +1,97 @@
+title: Eider on the Mac
+description: The Eider Mac app and its install engine: how an IPA becomes a Mac app, the compatibility shims, Interface Size, the Library, Updates, and launch diagnostics.
+---
+<h1>Eider on the Mac</h1>
+<p class="lede">Eider.app is laid out like the Mac App Store and shares one engine, <code>EiderKit</code>, with the <a href="cli.html"><code>eider</code> command</a>, so the two behave the same.</p>
+
+<div class="note"><p>Apple silicon only, macOS 14 or later. Installing needs no Xcode or Command Line Tools: the install path runs only <code>codesign</code>, <code>unzip</code> and <code>lsregister</code>.</p></div>
+
+<h2 id="app">The app</h2>
+<p>Five places in the sidebar:</p>
+<ul>
+  <li><strong>Library:</strong> a grid of what you installed.</li>
+  <li><strong>Updates:</strong> every installed app a source has a newer version of, with its release notes, Update and Update All. The count shows on the sidebar and on the Dock icon.</li>
+  <li><strong>Browse:</strong> the apps your sources offer, each with a <a href="sources.html#app-detail">product page</a>.</li>
+  <li><strong>Activity:</strong> downloads and installs, one progress ring each.</li>
+  <li><strong>Sources:</strong> add, refresh and remove them, import and export the list.</li>
+</ul>
+<p>Dropping an <code>.ipa</code> on the window installs it. An <code>eider://source/&lt;url&gt;</code> or <code>eider://install/&lt;url&gt;</code> link always asks before it does anything. The install sheet lets you choose the destination folder, the interface size and extra options such as dylibs to link in. On macOS 26 and later the window uses Liquid Glass, with a material fallback on macOS 14 and 15; lists stay plain so catalogs with thousands of apps scroll smoothly, and icons load only for rows on screen. The icon is a layered Icon Composer icon: on macOS 26 and later the system adds its glass and the Default, Dark, Clear and Tinted looks; macOS 14 and 15 get a flat version drawn from the same shapes.</p>
+<figure><img src="images/library.png" width="1100" height="720" alt="Library: an installed app with an update available" loading="lazy"><figcaption>The Library, drawn by the app's <code>--snapshot</code> mode against a test source.</figcaption></figure>
+
+<h2 id="install">How an install works</h2>
+<ol>
+  <li>Unpack the archive, refusing unsafe entries, and find the one <code>Payload/*.app</code>.</li>
+  <li>Read <code>Info.plist</code>; refuse an unsafe bundle id, executable or name.</li>
+  <li>Refuse any binary that is still FairPlay-encrypted.</li>
+  <li>Convert every Mach-O: thin to arm64, rewrite the platform to Mac Catalyst (each binary keeps its own SDK version), repoint the Swift UIKit overlay. This is done in pure Swift, with no <code>lipo</code>, <code>vtool</code> or <code>install_name_tool</code>.</li>
+  <li>Edit <code>Info.plist</code> (<code>MinimumOSVersion</code>, the Mac idiom if asked, name and id).</li>
+  <li>Link the <a href="#shims">shims</a> into the main executable.</li>
+  <li>Sign every binary and nested bundle ad hoc, then the app with a sandbox entitlement set plus the app's own app-group ids, and verify each signature strictly.</li>
+  <li>Stage the app on the destination volume, move any earlier copy to the Trash, move the new one in, and record it in <code>library.json</code>.</li>
+  <li>Write the <a href="#interface-size">interface size</a> into the app's own preferences.</li>
+</ol>
+<p>Only the app-group ids are copied from the IPA's original entitlements. <code>application-identifier</code>, the team id and keychain groups belong to a developer account, and an ad hoc signature that claims them is killed. Each group id must be plain letters, digits, <code>.</code>, <code>-</code>, <code>_</code> (at most 255 bytes, at most 32 groups); others are dropped with an install warning.</p>
+<p>A bundle already at the destination is replaced only if Eider installed it or you pass <code>--force</code>, and the old copy goes to the Trash, never deleted. An update of an installed app installs exactly the version it found, keeps the installed options and data, and stops before placement if the IPA's final id differs, so an update can replace the app it was asked to or nothing.</p>
+<p>The <code>legacy/</code> folder of the repository holds the shell installer this came from and the measurements behind these steps.</p>
+
+<h2 id="shims">The shims</h2>
+<p>An ad hoc signature gets no keychain, no app groups, no usable OpenGL and no CallKit, so small libraries are linked in (built by <code>Scripts/build-shims.sh</code>):</p>
+<dl>
+  <dt>Keychain</dt>
+  <dd>An emulated keychain stored in the app's container, so a sign-in survives a relaunch. <code>--no-keychain</code> opts out. It treats request flags such as <code>kSecUseNoAuthenticationUI</code> as flags, not item attributes.</dd>
+  <dt>App groups</dt>
+  <dd>A writable app-group folder inside the app's own container, because macOS denies an ad hoc signed app its real ones. Each signed group's preferences (NSUserDefaults suites and the CFPreferences functions) are stored under their own domain in the container, since cfprefsd refuses writes to a domain named after one of the app's groups. Apps that read their team id from their own signature get an answer with the same prefix the keychain shim uses.</dd>
+  <dt>OpenGL ES</dt>
+  <dd>Run-time GL lookups are answered by OpenGL ES instead of desktop OpenGL, for apps that link OpenGL ES.</dd>
+  <dt>CallKit</dt>
+  <dd>CallKit keys its clients by an application identifier an ad hoc signature cannot carry, so the system refuses the app's call provider and crashes when a call is placed. For apps that link CallKit, the app's own &ldquo;use CallKit for this call?&rdquo; checks answer no, so an app with its own call path (WhatsApp) takes it. An app with no such fallback gains nothing.</dd>
+  <dt>Camera</dt>
+  <dd>For apps that link AVFoundation, a requested frame rate outside what the active camera format supports is moved to the nearest supported one. iPhone-style variable rates against a fixed 30 fps Mac webcam otherwise crash the app at the first video frame.</dd>
+  <dt>Per-app quirks</dt>
+  <dd>Some apps misbehave because of their own code. A table (<code>AppQuirks.all</code>) holds rows of bundle id, class, selector and a forced BOOL return, written into the bundle at install time and applied only when the class and method exist and the method is a no-argument BOOL getter. The first row is YouTube's, whose launch sequence loses the race with Catalyst's late first scene and leaves a blank window. Adding an app is one row, not a new shim; <a href="{{repo}}/blob/main/docs/ARCHITECTURE.md#adding-a-quirk-row">the architecture notes</a> say how.</dd>
+  <dt>Keychain-fix tweaks</dt>
+  <dd>A bundled &ldquo;keychain fix&rdquo; tweak library is replaced by an empty one so it cannot defeat the keychain shim.</dd>
+</dl>
+<p>The keychain shim (unless you opt out) and the app-group shim are always linked; the OpenGL ES, CallKit and camera shims are linked only when some binary in the bundle links the framework each one corrects.</p>
+
+<h2 id="interface-size">Interface Size</h2>
+<p>An iPad app under Mac Catalyst draws at 77% (&ldquo;Scale Interface to Match iPad&rdquo;), so its 44 pt controls and 11 pt labels come out at 34 pt and 8.5 pt, smaller than Apple's own apps. UIKit reads two keys from the app's own preferences at launch: <code>iOSMacScaleFactor</code> (a number that replaces the 77%) and <code>UIUserInterfaceIdiomMac</code> (the Mac idiom, 1:1, without touching <code>UIDeviceFamily</code>). Eider writes them into the app's container, never into the bundle, so the signature is untouched, a change takes a relaunch rather than a reinstall, and an update keeps it.</p>
+<table>
+  <thead><tr><th>Choice</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>Auto (default for new installs)</td><td>100% on the built-in display, so UIKit points map 1:1 to Mac points as Apple's own apps draw. On an external display, which sits further away, Auto scales so a point covers the same visual angle as on a MacBook's built-in display at its default resolution (127 pt/in at 50 cm against about 65 cm), within 100-125%: 110% on a 27-inch display at &ldquo;looks like 2560 x 1440&rdquo;. Worked out when applied and each time Eider opens.</td></tr>
+    <tr><td>77%</td><td>UIKit's default for iPad apps.</td></tr>
+    <tr><td>85%, 100%, 115%</td><td>Fixed scale factors.</td></tr>
+    <tr><td>Mac idiom</td><td>The Mac idiom, 1:1 with the display. Changes control styles and can break iPad layouts; it was checked only on YouTube's first screens.</td></tr>
+  </tbody>
+</table>
+<p>Set it in the install sheet, in each app's menu in the Library (Interface Size), or with <code>eider scale</code>. Apps installed before Interface Size existed stay at 77% until you pick a size; a one-time Library banner offers &ldquo;Use Auto&rdquo;. Measured with YouTube 21.47.6 on a built-in Retina display: at Auto, its Back and Search controls measure 44 x 44 pt instead of 33 x 33.</p>
+
+<h2 id="library">Library</h2>
+<p>The Library is an icon grid of the apps Eider installed, recorded in <code>library.json</code>. Each app has Open, Update (when one is available), Interface Size, Diagnose, Show in Finder and Uninstall in its menu. A Show Updates button appears when any app has a newer version. Uninstall moves the app to the Trash and, if you ask, its data container too; <a href="faq.html#limitations">moving another app's container needs Full Disk Access</a>. The same operations are available as <code>eider list</code>, <code>open</code>, <code>scale</code> and <code>uninstall</code>.</p>
+
+<h2 id="updates">Updates and Update All</h2>
+<p>A catalog install or update records where the app came from: the source's address and the entry's id and name as the source lists them. That origin is the only link back to the entry, because a source may list an app under another id than the app has (an entry listed as <code>com.kdt.l!vecontainer</code> installs as <code>com.kdt.livecontainer</code>). To find an update, Eider takes per installed app:</p>
+<ol>
+  <li>the origin's entry, if that source is still added and still lists it;</li>
+  <li>otherwise, for an app installed before origins were recorded, the entries with its bundle id in the source it recorded;</li>
+  <li>otherwise the entries with its bundle id in any source that lists one name under that id. Where several apps share an id, which of them an installed app is cannot be told, so nothing is offered.</li>
+</ol>
+<p>A known origin is never widened to other sources. The offer is the newest candidate, only if it is newer than the installed version, and it names its source and entry. Commit-hash versions are never offered over numbered ones. The Updates page shows installed and new versions, the source, date and size, an expandable What's New and an Update button; Update All runs one app at a time through Activity. Updates keep the installed options and data. The list is worked out off the main thread at each reload, and the count shows on the sidebar and the Dock tile. <code>eider list</code> and <code>eider update [--all]</code> use the same matcher.</p>
+<figure><img src="images/updates.png" width="1100" height="720" alt="Updates: the installed app's newer version, with its source, date and size" loading="lazy"><figcaption>Updates, drawn against a test source.</figcaption></figure>
+
+<h2 id="doctor">Launch diagnostics: <code>eider doctor</code></h2>
+<p><code>eider open</code> launches an installed app and confirms it stays up; <code>eider doctor</code> does the same and, if the app does not stay up, says why. An app counts as running once it has stayed up for 8 seconds (<code>--settle &lt;seconds&gt;</code>, which must be less than <code>--timeout</code>, default 20). Use a longer settle for an app that fails late:</p>
+<pre><code>eider doctor com.example.app
+eider doctor com.example.app --settle 15</code></pre>
+<p>An app that dies sooner gets a diagnosis with a stable code, read from the system log and crash reports. Codes include:</p>
+<ul>
+  <li><code>launch.uncaught_exception</code>: an Objective-C exception, with the exception, its reason and the app binary that threw it. Checked first, because an exception proves the app ran past dyld and code signing.</li>
+  <li><code>launch.library_not_loaded</code>: a library the app needs could not be loaded.</li>
+  <li><code>launch.system_policy</code>: a system policy refused the launch. A crash is not blamed on a sandbox denial that refused some other process.</li>
+  <li><code>launch.window_not_attached</code>: the app stays up with an empty window because it built its first screen before macOS gave it a window. It is reported only when both signals are present: UIKit's &ldquo;whose view is not in the window hierarchy&rdquo; in the log and a window holding nothing but its title bar and container groups. Reading the window needs the Accessibility permission for the terminal or for Eider. Such an app needs a per-app workaround, so please report it.</li>
+</ul>
+<p>The code strings are a stable contract: codes are added, never renamed. With <code>--json</code>, the diagnosis is machine-readable.</p>
+
+<h2 id="legacy">Not in Eider</h2>
+<p>Game controls through PlayTools exist only in the <code>legacy/</code> shell installer, not in Eider. See <a href="faq.html#limitations">limitations</a> for what else does not work.</p>

@@ -1,0 +1,93 @@
+title: Limitations, known issues and FAQ
+description: What does not work in Eider, the known issues from the release notes, what is not yet verified, and answers to common questions.
+---
+<h1>Limitations, known issues and FAQ</h1>
+<p class="lede">Eider is early software. This page collects what does not work, what the release notes list as known issues, and answers to the questions people ask first.</p>
+
+<h2 id="limitations">What does not work</h2>
+<ul>
+  <li><strong>Encrypted IPAs are refused.</strong> App Store downloads are FairPlay-encrypted. Eider decrypts nothing.</li>
+  <li><strong>Push notifications, iCloud and in-app purchase</strong> need a real signature and entitlements; under an ad hoc signature they do not work.</li>
+  <li><strong>App extensions</strong> are outside the shims. <code>--remove-extensions</code> drops them, which often helps an app that will not sign or open.</li>
+  <li><strong>Logins stored by the keychain shim</strong> are a plain file under ordinary file permissions in the app's container, not behind your login password.</li>
+  <li><strong>Game controls through PlayTools</strong> exist only in the <code>legacy/</code> shell installer in the repository, not in Eider.</li>
+  <li><strong>An app built for a newer iOS than it adopted</strong> behaves as it would there. Some apps break under <code>--mac-idiom</code>.</li>
+  <li><strong>Apple silicon and macOS 14 or later only.</strong> An x86_64-only or simulator-only IPA will not install.</li>
+  <li><strong>Calls.</strong> The CallKit shim only helps apps with their own call path (WhatsApp is the example); an app with no such fallback gains nothing.</li>
+</ul>
+
+<h2 id="known-issues">Known issues</h2>
+<p>From the release notes of 0.1.10 and 0.1.11, the latest releases that carry a list:</p>
+<ul>
+  <li>A source added from a local file or a local network address cannot be imported back from an export. Add it by hand.</li>
+  <li>Uninstall with &ldquo;Also remove its data&rdquo; cannot move another app's data container to the Trash from inside the app without Full Disk Access.</li>
+  <li>App-specific issues found in a compatibility sweep of open-source apps, still open: Delta crashes at launch in its own code; iTorrent quits itself on its first launch and runs on the second; PPSSPP hits the sandbox's shared-memory rule.</li>
+  <li>Mac idiom was only checked on YouTube's first screens. It changes control styles and can break iPad layouts, so it is not the default.</li>
+  <li>An app that stays up with an empty window needs a per-app workaround; <code>eider doctor</code> reports it as <code>launch.window_not_attached</code> so it can be reported.</li>
+  <li>Apps installed before a release that adds a shim need reinstalling to get it.</li>
+</ul>
+<p>Older notes also list that the Library held one app per bundle id (0.1.7), so installing one YouTube-variant over another replaces it, and that Update and Update All had not been run against a real app with a newer version (0.1.7 and earlier). Later notes do not say these were resolved, so treat them as unverified.</p>
+
+<h2 id="compatibility">What has been tried</h2>
+<ul>
+  <li>iSH was installed from a 17,430-app source, opened from the Library and seen to stay running (0.1.1).</li>
+  <li>YouTube 21.47.6: installed, the blank window fixed with a per-app quirk row, and its controls measured at full size at Auto interface size (0.1.8, 0.1.9).</li>
+  <li>A sweep of ten open-source apps from their own releases, launched from Finder, killed with <code>kill -9</code> and relaunched (0.1.10). Opened with content: Feather, Jitterbug, LiveContainer, Mirarr, SideStore, StikDebug, UTM SE.</li>
+  <li>The CallKit and camera shims link and verify; the 0.1.1 notes say no call had been placed yet.</li>
+</ul>
+<p>Compatibility is per app. If one does not work, run <code>eider doctor &lt;bundle-id&gt;</code> and <a href="{{repo}}/issues/new/choose">file an app compatibility report</a>.</p>
+
+<h2 id="not-verified">Pre-release and not yet verified</h2>
+<ul>
+  <li>Every release to date is marked pre-release, with the label &ldquo;Still early software&rdquo;.</li>
+  <li>Eider for iOS is unreleased; its full on-device flow with the manifest server set inside the app, and the whole pairing method, are not verified. See <a href="ios.html#status">its status</a>.</li>
+  <li>The icon had not been seen on macOS 14 or 15 as of 0.1.4; the Dock badge had been checked as a count, not on a live Dock.</li>
+  <li>Eider's own end-to-end checks install only into temporary folders; the unit and end-to-end counts in each release's notes say what ran.</li>
+</ul>
+
+<h2 id="faq">FAQ</h2>
+
+<h3>What is Eider, in one sentence?</h3>
+<p>A Mac app and command line tool that reads AltStore and PlayCover style sources, downloads the decrypted iOS IPAs they list, and installs each as an ordinary Mac app on Apple silicon.</p>
+
+<h3>How is it related to Feather and PlayCover?</h3>
+<p>It is inspired by Feather (sources) and PlayCover (the install mechanism) and is not affiliated with either. It contains no code from them or from PlayTools, which are GPL or AGPL; Eider is MIT licensed.</p>
+
+<h3>Does Eider include any apps or sources?</h3>
+<p>No. It ships no sources. You add the ones you trust.</p>
+
+<h3>Can I install apps from the App Store with it?</h3>
+<p>No. Those IPAs are encrypted and Eider refuses them. It does not decrypt anything.</p>
+
+<h3>Why does macOS warn me when I open it?</h3>
+<p>Eider is ad hoc signed, not notarized. Open it once and approve it in System Settings &gt; Privacy &amp; Security.</p>
+
+<h3>Do I need Xcode?</h3>
+<p>No, not to install apps. The install path runs only <code>codesign</code>, <code>unzip</code> and <code>lsregister</code>. You need Xcode only to build Eider for iOS or to build from source (a Swift toolchain).</p>
+
+<h3>Why do iPad apps look small?</h3>
+<p>Mac Catalyst draws iPad apps at 77%. Eider's Interface Size sets a larger scale (Auto by default for new installs). See <a href="mac.html#interface-size">Interface Size</a>.</p>
+
+<h3>My app quits right away. What now?</h3>
+<p>Run <code>eider doctor &lt;bundle-id&gt;</code> (add <code>--settle 15</code> for an app that fails late). It reports a stable code such as <code>launch.uncaught_exception</code> with the reason. Try <code>--remove-extensions</code>, <code>--no-keychain</code> or <code>--reset</code> on a reinstall, and report the app if it still fails.</p>
+
+<h3>Does an update delete my data?</h3>
+<p>No. Updates keep the installed options and data. <code>--reset</code> on install is what clears saved data, and it needs the app to be quit.</p>
+
+<h3>How do I move my sources to another Mac?</h3>
+<p>Export from the Sources page (or <code>eider source export -o sources.json</code>) and import there. See <a href="sources.html#import-export">import and export</a>.</p>
+
+<h3>Can Eider for iOS install apps from the App Store?</h3>
+<p>No. It signs IPAs you supply or download from your sources with your own certificate. It has no way around Apple's signing requirements, and a free or paid developer certificate has the limits Apple sets on it.</p>
+
+<h3>Why does the iOS app need a manifest server?</h3>
+<p>Because on iOS 27 the system installer refuses a manifest URL served by the iPhone itself. The manifest must come from another host; the IPA can come from the iPhone. See <a href="ios.html#manifest-rule">the measured rule</a>.</p>
+
+<h3>Does Eider collect any data?</h3>
+<p>No. See <a href="security.html#privacy">privacy</a>.</p>
+
+<h3>How do I uninstall Eider?</h3>
+<p>Use <code>brew uninstall --cask eider</code>, or move <code>Eider.app</code> to the Trash. Apps Eider installed are separate apps; remove them with <code>eider uninstall</code> or from the Library first. <code>brew uninstall --zap --cask eider</code> also removes <code>~/Library/Application Support/Eider</code>.</p>
+
+<h3>How can I help?</h3>
+<p>Report app compatibility results and bugs with the issue templates, and read <a href="{{repo}}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> before sending code. Do not copy code from GPL or AGPL projects such as Feather, PlayCover, PlayTools, AltStore or SideStore.</p>

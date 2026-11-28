@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'self'; base-uri 'self'; form-action 'none'">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<meta name="color-scheme" content="light dark">
+<link rel="canonical" href="{{canonical}}">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{title}}">
+<meta property="og:description" content="{{description}}">
+<meta property="og:url" content="{{canonical}}">
+<meta property="og:image" content="{{site_url}}assets/icon-512.png">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="./"><img src="assets/favicon.png" alt="" width="28" height="28">Eider</a>
+    <nav class="nav" aria-label="Main">
+{{nav}}
+      <a href="{{repo}}">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main id="main">
+{{layout}}
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h2>Eider {{version}}</h2>
+        <p>Pre-release software. MIT licence.<br>Not affiliated with Feather, PlayCover or Apple.</p>
+      </div>
+      <div>
+        <h2>Pages</h2>
+        <ul>
+{{footer_links}}
+        </ul>
+      </div>
+      <div>
+        <h2>Project</h2>
+        <ul>
+          <li><a href="{{repo}}">Source on GitHub</a></li>
+          <li><a href="{{releases_url}}">Releases</a></li>
+          <li><a href="{{repo}}/issues">Issues</a></li>
+          <li><a href="{{repo}}/security/advisories/new">Report a vulnerability</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
