@@ -83,16 +83,18 @@ final class InstallJob: Identifiable {
             // Signing may have changed these; the manifest must match the signed app.
             let signedInfo = (try? await Task.detached { try BundleInfo.read(appAt: appURL) }.value) ?? info
             try await step(.install) {
+                guard let manifestServer = model.manifestServer else { throw InstallJobError.noManifestServer }
                 installDetail = "Starting the local server..."
                 let stages = try await installer.install(
                     ipaAt: signed, bundleIdentifier: signedInfo.bundleID,
-                    version: signedInfo.version, title: signedInfo.name)
+                    version: signedInfo.version, title: signedInfo.name, manifestServer: manifestServer)
                 var handed = false
                 for try await stage in stages {
                     switch stage {
                     case .opened:
                         installDetail = "Confirm Install in the alert iOS shows."
                     case .manifestFetched:
+                        // iOS asked for the IPA: it has the manifest from the manifest server.
                         installDetail = "iOS is fetching the app..."
                     case .downloading(let sent, let total):
                         installFraction = total > 0 ? Double(sent) / Double(total) : nil
@@ -143,8 +145,13 @@ final class InstallJob: Identifiable {
 
 enum InstallJobError: LocalizedError {
     case notHandedOver
+    /// Cleared between the readiness check and the Install step.
+    case noManifestServer
 
     var errorDescription: String? {
-        "iOS did not fetch the app. If you tapped Cancel in the alert, install again."
+        switch self {
+        case .notHandedOver: "iOS did not fetch the app. If you tapped Cancel in the alert, install again."
+        case .noManifestServer: "Add your manifest server in Settings > Install on this iPhone, then install again."
+        }
     }
 }

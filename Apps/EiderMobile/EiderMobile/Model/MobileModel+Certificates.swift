@@ -61,12 +61,32 @@ extension MobileModel {
         }
     }
 
-    /// Probes the loopback server with the system's own trust (EiderInstall);
-    /// only `.ready` lets an install start.
+    /// Asks the manifest server and probes the local server with the system's
+    /// own trust (EiderInstall); only `.ready` lets an install start.
     func checkInstallReadiness() async {
         isCheckingReadiness = true
         defer { isCheckingReadiness = false }
-        installReadiness = await installer.readiness()
+        installReadiness = await installer.readiness(manifestServer: manifestServer)
+    }
+
+    /// Checks and stores what the person entered as the manifest server, then
+    /// checks readiness again. Returns the message to show when it is refused.
+    func saveManifestServer(_ text: String) async -> String? {
+        do {
+            let url = try ManifestServerAddress.parse(text)
+            try ManifestServerKeychain.set(url)
+            manifestServer = url
+        } catch {
+            return error.localizedDescription
+        }
+        await checkInstallReadiness()
+        return nil
+    }
+
+    func clearManifestServer() async {
+        ManifestServerKeychain.delete()
+        manifestServer = nil
+        await checkInstallReadiness()
     }
 
     /// Serves Eider's root as a profile and opens it in Safari, which offers to

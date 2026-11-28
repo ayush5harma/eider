@@ -86,6 +86,8 @@ final class MobileModel {
     // Installing on this device
     var installReadiness: InstallReadiness?
     var isCheckingReadiness = false
+    /// The manifest server's endpoint, from the Keychain; nil until the person adds one.
+    var manifestServer: URL? = ManifestServerKeychain.load()
 
     init(
         paths: EiderPaths = EiderPaths(),
