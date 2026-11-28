@@ -49,7 +49,7 @@ public final class LocalInstallServer: @unchecked Sendable {
     ///   - address: this device's LAN address (`LocalNetwork.installAddress()`).
     public convenience init(identity: SecIdentity, address: DeviceAddress, ipa: URL, bundleID: String,
                             version: String, title: String, timeout: TimeInterval = 15 * 60) throws {
-        try self.init(identity: identity, address: address, ownAddresses: LocalNetwork.interfaceAddresses,
+        try self.init(identity: identity, address: address, ownAddresses: { LocalNetwork.interfaceAddresses() },
                       ipa: ipa, bundleID: bundleID, version: version, title: title, timeout: timeout)
     }
 

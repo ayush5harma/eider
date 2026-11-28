@@ -99,7 +99,7 @@ public final class LocalInstaller: @unchecked Sendable {
     ///   - installAddress: the address to serve from, read at each install.
     public init(authority: LocalRootAuthority, opener: Opener? = nil, background: BackgroundActivity? = nil,
                 timeout: TimeInterval = 15 * 60, grace: TimeInterval = 10,
-                installAddress: @escaping @Sendable () -> DeviceAddress? = LocalNetwork.installAddress) {
+                installAddress: @escaping @Sendable () -> DeviceAddress? = { LocalNetwork.installAddress() }) {
         self.authority = authority
         self.installAddress = installAddress
         #if canImport(UIKit)

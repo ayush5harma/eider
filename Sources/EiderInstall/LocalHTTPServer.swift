@@ -82,7 +82,7 @@ final class LocalHTTPServer: @unchecked Sendable {
     ///   - identity: TLS identity; nil serves plain HTTP.
     ///   - binding: the address to listen on.
     init(identity: SecIdentity?, binding: Binding = .loopback,
-         ownAddresses: @escaping @Sendable () -> [LocalNetwork.InterfaceAddress] = LocalNetwork.interfaceAddresses,
+         ownAddresses: @escaping @Sendable () -> [LocalNetwork.InterfaceAddress] = { LocalNetwork.interfaceAddresses() },
          router: @escaping Router) {
         self.identity = identity
         self.binding = binding
