@@ -123,8 +123,9 @@ A second, fully local way to install, asked for on 2026-11-28 ("like Feather's i
 
 The parts live in two places:
 
-- `Native/IDeviceFFI`: a small Rust static library over idevice (jkcoxson/idevice, MIT), pinned at `c8fff6d` (2026-11-22, which follows the 2026-11-16 fix for iOS 27.2+ requiring one RSD UUID per tunnel), with only the features it uses: `remote_pairing`, `tunnel_tcp_stack`, `rsd`, `afc`, `installation_proxy` and `ring`. Its C API (`include/eider_idevice.h`) is `eider_idevice_check`, `eider_idevice_install` and `eider_idevice_uninstall`. Each call opens its own tunnel and runs on a thread with a 16 MB stack: on a GCD worker thread (512 KB) the first check overflowed the stack guard. `Scripts/build-idevice.sh` builds it for iOS, the iOS simulator and the Mac and makes `IDeviceFFI.xcframework`; the zip is the `idevice-c8fff6d` pre-release asset, with idevice's LICENSE beside it and inside it, and Package.swift names it by URL and checksum. Stripped static libraries, 2026-11-28: ios-arm64 2,109,896 bytes, ios-arm64-simulator 2,097,160, macos-arm64 2,108,320; the zip is 2,747,401 bytes.
-- `EiderPairing` (Swift, macOS and iOS): `RemotePairingFile`, `PairingInstaller` (an actor with `check()`, `install(ipa:bundleID:progress:)` and `uninstall(bundleID:)`, host `10.7.0.1` and port 49152 by default), `PairingReachability`, `PairingInstallProgress` and `PairingInstallError`, whose messages are written for the user.
+- `Native/IDeviceFFI`: a small Rust static library over idevice (jkcoxson/idevice, MIT), pinned at `c8fff6d` (2026-11-22, which follows the 2026-11-16 fix for iOS 27.2+ requiring one RSD UUID per tunnel), with only the features it uses: `remote_pairing`, `tunnel_tcp_stack`, `rsd`, `afc`, `installation_proxy` and `ring`. Its C API (`include/eider_idevice.h`) is `eider_idevice_check`, `eider_idevice_install` and `eider_idevice_uninstall`. Each call opens its own tunnel and runs on a thread with a 16 MB stack: on a GCD worker thread (512 KB) the first check overflowed the stack guard. Every step has an upper bound, because idevice's installation_proxy waits on a read and the tunnel's TCP stack only gives up on unacknowledged writes, so a phone that sleeps mid-install would otherwise block the call for good. The TCP connect is bounded by the caller's timeout (then "unreachable"), pairing, tunnel and RSD by the same amount again (then "timed out"), the upload by 60 s plus 1 s per 256 KiB, the install by 300 s plus 1 s per MiB, and the uninstall by 120 s. Errors are classified by the step that failed: only a failed TCP connect is "unreachable", and only a pair-verify failure or an explicit rejection is "pairing rejected". tracing is compiled out (`max_level_off`), because idevice debug-logs the whole RP pairing dictionary, private key included, when it parses one.
+- `Scripts/build-idevice.sh` builds it for iOS, the iOS simulator and the Mac and makes `IDeviceFFI.xcframework`. The zip is the `idevice-c8fff6d-2` pre-release asset (build 2; `idevice-c8fff6d` was the first build, before the review fixes), with idevice's LICENSE beside it and inside it, and Package.swift names it by URL and checksum. `eider_idevice_version()` names the Eider commit it was built from. Stripped static libraries, 2026-11-28: ios-arm64 2,121,232 bytes, ios-arm64-simulator 2,109,056, macos-arm64 2,119,472; the zip is 2,766,233 bytes.
+- `EiderPairing` (Swift, macOS and iOS): `RemotePairingFile`, `PairingInstaller` (an actor with `check()`, `verify()` (the same check, throwing the typed error), `install(ipa:bundleID:progress:)` and `uninstall(bundleID:)`, host `10.7.0.1` and port 49152 by default; check() runs on its own queue, so it never waits behind an install), `PairingReachability`, `PairingInstallProgress` and `PairingInstallError`, whose messages are written for the user.
 
 ### What the user needs
 
@@ -138,18 +139,20 @@ Pairing material grants full access to the device: the app keeps the file in its
 
 ### Measured
 
-On 2026-11-28, from the Mac over Wi-Fi to the iPhone 17 Pro "Sapphire" (iOS 27.3) at `192.168.1.50:49152`, with an RP pairing file converted from the pymobiledevice3 record made on 2026-11-22 (so the conversion is proved), `PairingDeviceTests` through the published xcframework:
+On 2026-11-28, from the Mac over Wi-Fi to the iPhone 17 Pro "Sapphire" (iOS 27.3) at `192.168.1.50:49152`, with an RP pairing file converted from the pymobiledevice3 record made on 2026-11-22 (so the conversion is proved), `PairingDeviceTests` through the published build 2 xcframework:
 
 ```
-check: ready in 0.32 s
+check: ready in 0.60 s
 check with an unknown pairing file: refused("the iPhone did not accept this pairing file (pair-verify failed)")
-install: 1.26 s, 16 progress events, first connecting, last upload uploading(sent: 21806, total: 21806)
+install: 1.09 s, 16 progress events, first connecting, last upload uploading(sent: 21806, total: 21806)
 devicectl after install: installed=true
-uninstall: 0.70 s
+uninstall: 0.68 s
 devicectl after uninstall: installed=false
 ```
 
-Not yet run: the same flow from the app on the iPhone through LocalDevVPN (10.7.0.1), and a large IPA (upload speed through the VPN is unmeasured).
+Build 1 gave the same result (check 0.32 s, install 1.26 s, uninstall 0.70 s). One run in between got `unreachable("no answer from 192.168.1.50:49152 within 5000 ms")` while the phone was idle. A ping woke it, and the next run passed. Over Wi-Fi from another computer, a dozing phone can look unreachable; through LocalDevVPN on the phone itself the app is awake, so this should not apply, but that is not measured.
+
+Not yet run: the same flow from the app on the iPhone through LocalDevVPN (10.7.0.1), a large IPA (upload speed through the VPN is unmeasured), and a timeout on the device itself (the bounds are tested offline against a loopback socket that accepts and stays silent).
 
 ## Testing
 
