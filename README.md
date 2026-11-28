@@ -4,6 +4,9 @@ Eider adds sources (repository JSON files), downloads the iOS `.ipa` archives
 they list, and installs each one as an ordinary Mac app on Apple silicon. It
 comes as a command line tool, `eider`, and a SwiftUI app, `Eider.app`.
 
+Documentation for every feature: <https://ayush5harma.github.io/eider/>
+(the static site in [site/](site/), published by GitHub Pages).
+
 ## Status
 
 Early: version 0.1.11. Apple silicon only, macOS 14 or later. Expect rough
