@@ -1,7 +1,7 @@
 import EiderInstall
 import Foundation
 
-/// The installer the app uses: EiderInstall's IPA archive and its loopback
+/// The installer the app uses: EiderInstall's IPA archive and its local
 /// HTTPS server, trusted through Eider's own name-constrained root
 /// (docs/IOS.md). One authority and one installer for the app's lifetime:
 /// the model creates this once.
@@ -27,8 +27,11 @@ struct AppInstaller: DeviceInstaller {
 
     func readiness() async -> InstallReadiness {
         switch await installer.authority.status() {
-        case .notSetUp: .notSetUp
+        case .notSetUp:
+            (try? await installer.authority.hasOutdatedRoot()) == true ? .certificateOutdated : .notSetUp
+        case .needsWiFi: .needsWiFi
         case .needsTrust: .needsTrust
+        case .unreachable: .unreachable
         case .ready: .ready
         }
     }
@@ -69,6 +72,11 @@ struct AppInstaller: DeviceInstaller {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+}
+
+extension InstallReadiness {
+    /// What to tell the person when there is no Wi-Fi, in EiderInstall's own words.
+    static let wifiMessage = LocalNetwork.noAddressMessage
 }
 
 /// EiderInstall's errors describe themselves through `description`, not

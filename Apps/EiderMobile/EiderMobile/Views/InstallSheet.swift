@@ -166,6 +166,11 @@ struct InstallSheet: View {
         Task {
             // Not trusted yet: the one-time setup, not a failure at the last step.
             await model.checkInstallReadiness()
+            // No Wi-Fi is not something the setup can fix: say so here.
+            if model.installReadiness == .needsWiFi {
+                validationMessage = InstallReadiness.wifiMessage
+                return
+            }
             guard model.installReadiness == .ready else {
                 settingUp = true
                 return

@@ -43,8 +43,15 @@ enum RevocationState: Sendable, Equatable {
 enum InstallReadiness: Sendable, Equatable {
     /// No root certificate made yet.
     case notSetUp
+    /// The certificate on this device predates installs from the Wi-Fi address: it only covers
+    /// 127.0.0.1, which iOS refuses for installs. The new one has to be installed and trusted.
+    case certificateOutdated
+    /// No Wi-Fi: iOS will not take an install served from the iPhone's internal address.
+    case needsWiFi
     /// The root exists; its profile is not installed or not fully trusted.
     case needsTrust
+    /// Eider could not connect to its own server at all; most likely Local Network access is off.
+    case unreachable
     case ready
 }
 
