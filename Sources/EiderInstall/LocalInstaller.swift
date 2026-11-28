@@ -6,10 +6,11 @@ import UIKit
 /// What an install has reached. The stream ends after `.handedToIOS`: from then on the
 /// install is iOS's (its progress shows on the home screen icon), not Eider's.
 public enum InstallProgress: Sendable, Equatable {
-    /// The install server is up and serves this manifest.
+    /// The install server is up; this is the manifest server's URL that names its IPA.
     case serving(manifest: URL)
     /// The itms-services link was handed to the system; iOS now asks the user to confirm.
     case opened(URL)
+    /// iOS asked for the IPA, so it has the manifest.
     case manifestFetched
     case downloading(sent: Int64, total: Int64)
     /// iOS received every byte of the IPA.
@@ -58,8 +59,9 @@ private final class BackgroundTask {
 }
 #endif
 
-/// Installs a signed IPA on the device the app runs on, through an itms-services link served
-/// from the app's own HTTPS server at its LAN address. See docs/IOS.md, "Installing on the device itself".
+/// Installs a signed IPA on the device the app runs on, through an itms-services link whose
+/// manifest comes from the manifest server on another host and whose IPA comes from the app's
+/// own HTTPS server at its LAN address. See docs/IOS.md, "Installing on the device itself".
 public final class LocalInstaller: @unchecked Sendable {
     public enum Error: Swift.Error, Equatable, CustomStringConvertible {
         /// The system would not open the link.
@@ -120,22 +122,26 @@ public final class LocalInstaller: @unchecked Sendable {
     }
     #endif
 
-    /// Serves `ipa` and its manifest, opens the itms-services link, and reports progress until
-    /// iOS has the whole IPA. Throws `.needsWiFi` without a private-network address, or if the
-    /// server cannot start or the link cannot be opened. Cancelling the stream's consumer stops
-    /// the server.
-    public func install(ipa: URL, bundleID: String, version: String, title: String)
+    /// Serves `ipa`, opens an itms-services link to the manifest server's manifest for it,
+    /// and reports progress until iOS has the whole IPA. Throws `.needsWiFi` without a
+    /// private-network address, or if the server cannot start or the link cannot be opened.
+    /// Cancelling the stream's consumer stops the server.
+    ///
+    /// - Parameter manifestBase: the manifest server's endpoint (`ManifestServer`). appstored
+    ///   refuses a manifest the iPhone serves itself, loopback or Wi-Fi address ("The manifest
+    ///   URL isn't external", iOS 27.3, 2026-11-28), but takes the IPA from the iPhone's Wi-Fi
+    ///   address when a manifest from another host names it.
+    public func install(ipa: URL, bundleID: String, version: String, title: String, manifestBase: URL)
         async throws -> AsyncThrowingStream<InstallProgress, Swift.Error> {
-        // appstored refuses a loopback manifest URL ("The manifest URL isn't external", iOS
-        // 27.3, 2026-11-28), so the server must be at the device's LAN address.
         guard let address = installAddress() else { throw Error.needsWiFi }
         let identity = try await authority.serverIdentity(for: [address])
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa,
-                                            bundleID: bundleID, version: version, title: title, timeout: timeout)
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase,
+                                            ipa: ipa, bundleID: bundleID, version: version, title: title,
+                                            timeout: timeout)
         let manifest = try await server.start()
         guard let link = LocalInstallServer.itmsServicesURL(manifest: manifest) else {
             server.stop()
-            throw Error.server("Could not build the itms-services link for \(manifest).")
+            throw Error.server("Could not build the itms-services link.")
         }
 
         let endBackground = await background.begin("Eider install")

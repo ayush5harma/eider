@@ -12,6 +12,8 @@ final class LocalInstallServerTests: XCTestCase {
     private var session: URLSession!
     /// This Mac's own LAN address, standing in for the iPhone's Wi-Fi address.
     private var address: DeviceAddress!
+    /// The manifest server, on another host: appstored refuses a manifest the iPhone serves.
+    private let manifestBase = URL(string: "https://manifests.example:8443/eider/manifest/s3cret.plist")!
 
     override func setUp() async throws {
         address = try macInstallAddress()
@@ -45,29 +47,25 @@ final class LocalInstallServerTests: XCTestCase {
         return all
     }
 
-    func testServesManifestAndIPAWithHeadAndRanges() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "org.example.demo",
-                                            version: "1.2.3", title: "Demo & Co")
+    func testServesTheIPAWithHeadAndRangesAndNamesItInTheManifestServerURL() async throws {
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase,
+                                            ipa: ipa, bundleID: "org.example.demo", version: "1.2.3", title: "Demo & Co")
         let manifestURL = try await server.start()
         let ipaURL = try XCTUnwrap(server.ipaURL)
-        // Not 127.0.0.1: appstored refuses a loopback manifest URL as not external.
-        XCTAssertEqual(manifestURL.host, address.description)
+        // The manifest comes from the manifest server; the IPA from this device's LAN address.
         XCTAssertEqual(ipaURL.host, address.description)
-        XCTAssertEqual(manifestURL.scheme, "https")
-        XCTAssertEqual(manifestURL.lastPathComponent, "manifest.plist")
-        XCTAssertEqual(server.token.count, 32)
+        XCTAssertEqual(ipaURL.scheme, "https")
+        XCTAssertEqual(ipaURL.path, "/\(server.token)/app.ipa")
+        XCTAssertNotNil(server.token.range(of: "^[0-9a-f]{32}$", options: .regularExpression), server.token)
+        XCTAssertTrue(manifestURL.absoluteString.hasPrefix(manifestBase.absoluteString + "?"), manifestURL.absoluteString)
+        let query = try XCTUnwrap(URLComponents(url: manifestURL, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(query.map(\.name), ["bundle", "version", "title", "url"])
+        XCTAssertEqual(query.map(\.value), ["org.example.demo", "1.2.3", "Demo & Co", ipaURL.absoluteString])
+        XCTAssertEqual(server.manifestURL, manifestURL)
 
-        let (manifestData, manifestResponse) = try await request(manifestURL)
-        XCTAssertEqual(manifestResponse.statusCode, 200)
-        let manifest = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: manifestData, format: nil) as? [String: Any])
-        let item = try XCTUnwrap((manifest["items"] as? [[String: Any]])?.first)
-        let asset = try XCTUnwrap((item["assets"] as? [[String: Any]])?.first)
-        XCTAssertEqual(asset["kind"] as? String, "software-package")
-        XCTAssertEqual(asset["url"] as? String, ipaURL.absoluteString)
-        let metadata = try XCTUnwrap(item["metadata"] as? [String: String])
-        XCTAssertEqual(metadata, ["bundle-identifier": "org.example.demo", "bundle-version": "1.2.3",
-                                  "kind": "software", "title": "Demo & Co"])
+        // The old local manifest route is gone: appstored refused it as not external.
+        let (_, local) = try await request(ipaURL.deletingLastPathComponent().appendingPathComponent("manifest.plist"))
+        XCTAssertEqual(local.statusCode, 404)
 
         let (headBody, head) = try await request(ipaURL, method: "HEAD")
         XCTAssertEqual(head.statusCode, 200)
@@ -99,7 +97,7 @@ final class LocalInstallServerTests: XCTestCase {
     }
 
     func testRangesThatTogetherCoverTheIPACountAsFullyServed() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a", version: "1",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase, ipa: ipa, bundleID: "a", version: "1",
                                             title: "A")
         try await server.start()
         let ipaURL = try XCTUnwrap(server.ipaURL)
@@ -109,28 +107,30 @@ final class LocalInstallServerTests: XCTestCase {
         server.stop()
         let events = await collect(server.events)
         XCTAssertTrue(events.contains(.ipaFullyServed), "\(events)")
-        XCTAssertFalse(events.contains(.manifestFetched))
+        XCTAssertEqual(events.filter { $0 == .manifestFetched }.count, 1, "\(events)")
     }
 
     func testUnknownTokenAndPathsAre404() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a", version: "1",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase, ipa: ipa, bundleID: "a", version: "1",
                                             title: "A")
-        let manifestURL = try await server.start()
+        try await server.start()
         defer { server.stop() }
-        let base = try XCTUnwrap(URL(string: "https://\(address!):\(manifestURL.port!)"))
-        for path in ["/0123456789abcdef0123456789abcdef/manifest.plist", "/\(server.token)/other",
-                     "/\(server.token)", "/", "/root.mobileconfig"] {
+        let ipaURL = try XCTUnwrap(server.ipaURL)
+        let base = try XCTUnwrap(URL(string: "https://\(address!):\(ipaURL.port!)"))
+        for path in ["/0123456789abcdef0123456789abcdef/app.ipa", "/\(server.token)/manifest.plist",
+                     "/\(server.token)/other", "/\(server.token)", "/", "/root.mobileconfig"] {
             let (_, response) = try await request(base.appendingPathComponent(path))
             XCTAssertEqual(response.statusCode, 404, path)
         }
-        let (_, post) = try await request(manifestURL, method: "POST")
+        let (_, post) = try await request(ipaURL, method: "POST")
         XCTAssertEqual(post.statusCode, 405)
     }
 
     func testListensOnTheGivenAddressOnly() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase, ipa: ipa, bundleID: "a",
                                             version: "1", title: "A")
-        let port = try await server.start().port!
+        try await server.start()
+        let port = try XCTUnwrap(server.ipaURL?.port)
         defer { server.stop() }
         XCTAssertEqual(tcpConnect(host: address.description, port: port), 0)
         XCTAssertEqual(tcpConnect(host: "127.0.0.1", port: port), ECONNREFUSED)
@@ -140,11 +140,12 @@ final class LocalInstallServerTests: XCTestCase {
     /// that only loopback is this device: a connection from the Mac's LAN address then looks
     /// like a stranger's and must get no answer at all.
     func testConnectionsFromOtherAddressesAreRefused() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ownAddresses: { [] },
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase, ownAddresses: { [] },
                                             ipa: ipa, bundleID: "a", version: "1", title: "A", timeout: 60)
-        let manifestURL = try await server.start()
+        try await server.start()
+        let ipaURL = try XCTUnwrap(server.ipaURL)
         do {
-            let (_, response) = try await request(manifestURL)
+            let (_, response) = try await request(ipaURL)
             XCTFail("A connection from \(address!) outside the device was answered: \(response.statusCode)")
         } catch let error as URLError {
             XCTAssertTrue([.networkConnectionLost, .secureConnectionFailed, .cannotConnectToHost,
@@ -156,14 +157,15 @@ final class LocalInstallServerTests: XCTestCase {
     }
 
     func testUntrustedRootIsRejectedByDefaultTrust() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a", version: "1",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, manifestBase: manifestBase, ipa: ipa, bundleID: "a", version: "1",
                                             title: "A")
-        let manifestURL = try await server.start()
+        try await server.start()
         defer { server.stop() }
+        let ipaURL = try XCTUnwrap(server.ipaURL)
         let plain = URLSession(configuration: .ephemeral)
         defer { plain.invalidateAndCancel() }
         do {
-            _ = try await request(manifestURL, using: plain)
+            _ = try await request(ipaURL, using: plain)
             XCTFail("The default trust accepted a root nobody trusted.")
         } catch let error as URLError {
             XCTAssertTrue([.serverCertificateUntrusted, .secureConnectionFailed, .serverCertificateHasUnknownRoot,
@@ -223,6 +225,29 @@ final class LocalInstallServerTests: XCTestCase {
         XCTAssertEqual(
             LocalInstallServer.itmsServicesURL(manifest: manifest)?.absoluteString,
             "itms-services://?action=download-manifest&url=https%3A%2F%2F127.0.0.1%3A50123%2Fabc%2Fmanifest.plist")
+    }
+
+    /// The manifest server's URL goes into the link encoded once more, so its own encoded query
+    /// values (the IPA URL among them) arrive at the manifest server intact.
+    func testItmsServicesLinkForTheManifestServer() throws {
+        let ipa = URL(string: "https://192.168.1.50:61901/0123456789abcdef0123456789abcdef/app.ipa")!
+        let manifest = try XCTUnwrap(ManifestServer.manifestURL(
+            base: URL(string: "https://192.168.1.117:8443/eider/manifest/s3cret.plist")!,
+            bundleID: "com.example.app", version: "2.2.0", title: "iTorrent Beta", ipa: ipa))
+        XCTAssertEqual(
+            manifest.absoluteString,
+            "https://192.168.1.117:8443/eider/manifest/s3cret.plist?bundle=com.example.app&version=2.2.0"
+                + "&title=iTorrent%20Beta&url=https%3A%2F%2F192.168.1.50%3A61901%2F0123456789abcdef0123456789abcdef%2Fapp.ipa")
+        let link = try XCTUnwrap(LocalInstallServer.itmsServicesURL(manifest: manifest))
+        XCTAssertEqual(
+            link.absoluteString,
+            "itms-services://?action=download-manifest&url=https%3A%2F%2F192.168.1.117%3A8443%2Feider%2Fmanifest%2Fs3cret.plist"
+                + "%3Fbundle%3Dcom.example.app%26version%3D2.2.0%26title%3DiTorrent%2520Beta%26url%3Dhttps%253A%252F%252F"
+                + "192.168.1.50%253A61901%252F0123456789abcdef0123456789abcdef%252Fapp.ipa")
+        // What iOS reads back out of the link is the manifest URL, unchanged.
+        let decoded = URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems?
+            .first { $0.name == "url" }?.value
+        XCTAssertEqual(decoded, manifest.absoluteString)
     }
 }
 

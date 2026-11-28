@@ -1,16 +1,19 @@
 import Foundation
 import Security
 
-/// Serves one IPA and its itms-services manifest over HTTPS at one of this device's own LAN
-/// addresses, answering only connections from the device itself.
+/// Serves one IPA over HTTPS at one of this device's own LAN addresses, answering only
+/// connections from the device itself, and names it in a manifest URL on the manifest server.
 ///
-/// Not 127.0.0.1: appstored refuses a loopback manifest URL before connecting ("The manifest
-/// URL isn't external", iOS 27.3, measured 2026-11-28; see `LocalNetwork`). Paths carry a
-/// random 128-bit token, `/<token>/manifest.plist` and `/<token>/app.ipa`, so another app on
-/// the device that finds the port still cannot fetch the IPA. Everything else is a 404. The
-/// server stops itself after `timeout`.
+/// The manifest is not served here: appstored refuses a manifest the iPhone serves itself,
+/// from 127.0.0.1 and from its own Wi-Fi address alike ("The manifest URL isn't external",
+/// iOS 27.3, measured 2026-11-28; see `ManifestServer`), but it fetches the IPA from the
+/// iPhone's Wi-Fi address once a manifest from another host points there. The one path,
+/// `/<token>/app.ipa`, carries a random 128-bit token, so another app on the device that finds
+/// the port still cannot fetch the IPA. Everything else is a 404. The server stops itself
+/// after `timeout`.
 public final class LocalInstallServer: @unchecked Sendable {
     public enum Event: Sendable, Equatable {
+        /// iOS asked for the IPA (HEAD or GET), so it has the manifest from the manifest server.
         case manifestFetched
         /// Distinct bytes of the IPA sent so far, and its size.
         case ipaBytesServed(sent: Int64, total: Int64)
@@ -27,8 +30,10 @@ public final class LocalInstallServer: @unchecked Sendable {
     public let bundleID: String
     public let version: String
     public let title: String
-    /// The address the URLs name and the listener binds.
+    /// The address the IPA URL names and the listener binds.
     public let address: DeviceAddress
+    /// The manifest server's endpoint (`ManifestServer`).
+    public let manifestBase: URL
 
     private let continuation: AsyncStream<Event>.Continuation
     private let timeout: TimeInterval
@@ -37,7 +42,7 @@ public final class LocalInstallServer: @unchecked Sendable {
     private let ipaSize: Int64
     private let lock = NSLock()
     private var server: LocalHTTPServer?
-    private var manifest: Data?
+    private var ipaRequested = false
     private var served = ServedRanges()
     private var fullyServed = false
     private var stopped = false
@@ -47,18 +52,22 @@ public final class LocalInstallServer: @unchecked Sendable {
     ///   - identity: a leaf whose subjectAltName holds `address`
     ///     (`LocalRootAuthority.serverIdentity(for:)`).
     ///   - address: this device's LAN address (`LocalNetwork.installAddress()`).
-    public convenience init(identity: SecIdentity, address: DeviceAddress, ipa: URL, bundleID: String,
-                            version: String, title: String, timeout: TimeInterval = 15 * 60) throws {
-        try self.init(identity: identity, address: address, ownAddresses: { LocalNetwork.interfaceAddresses() },
+    ///   - manifestBase: the manifest server's endpoint, on another host.
+    public convenience init(identity: SecIdentity, address: DeviceAddress, manifestBase: URL, ipa: URL,
+                            bundleID: String, version: String, title: String,
+                            timeout: TimeInterval = 15 * 60) throws {
+        try self.init(identity: identity, address: address, manifestBase: manifestBase,
+                      ownAddresses: { LocalNetwork.interfaceAddresses() },
                       ipa: ipa, bundleID: bundleID, version: version, title: title, timeout: timeout)
     }
 
     /// `ownAddresses` decides which remote addresses count as this device; tests narrow it.
-    init(identity: SecIdentity, address: DeviceAddress,
+    init(identity: SecIdentity, address: DeviceAddress, manifestBase: URL,
          ownAddresses: @escaping @Sendable () -> [LocalNetwork.InterfaceAddress], ipa: URL, bundleID: String,
          version: String, title: String, timeout: TimeInterval) throws {
         self.identity = identity
         self.address = address
+        self.manifestBase = manifestBase
         self.ownAddresses = ownAddresses
         self.ipa = ipa
         self.bundleID = bundleID
@@ -73,8 +82,20 @@ public final class LocalInstallServer: @unchecked Sendable {
 
     deinit { stop() }
 
-    public var manifestURL: URL? { url(for: "manifest.plist") }
-    public var ipaURL: URL? { url(for: "app.ipa") }
+    /// The manifest server's URL for this install, naming `ipaURL` as the asset.
+    public var manifestURL: URL? {
+        ipaURL.flatMap {
+            ManifestServer.manifestURL(base: manifestBase, bundleID: bundleID, version: version, title: title, ipa: $0)
+        }
+    }
+
+    /// `https://<address>:<port>/<token>/app.ipa`, once started.
+    public var ipaURL: URL? {
+        guard let port = lock.withLock({ port }) else { return nil }
+        return URL(string: "https://\(address):\(port)\(ipaPath)")
+    }
+
+    private var ipaPath: String { "/\(token)/app.ipa" }
 
     /// `itms-services://?action=download-manifest&url=<percent-encoded manifest URL>`.
     public var itmsServicesURL: URL? {
@@ -82,15 +103,14 @@ public final class LocalInstallServer: @unchecked Sendable {
     }
 
     public static func itmsServicesURL(manifest: URL) -> URL? {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        guard let encoded = manifest.absoluteString.addingPercentEncoding(withAllowedCharacters: allowed) else {
+        guard let encoded = manifest.absoluteString.addingPercentEncoding(
+            withAllowedCharacters: ManifestServer.unreserved) else {
             return nil
         }
         return URL(string: "itms-services://?action=download-manifest&url=" + encoded)
     }
 
-    /// Starts listening and returns the manifest URL.
+    /// Starts listening and returns the manifest server's URL for this install.
     @discardableResult
     public func start() async throws -> URL {
         let server = LocalHTTPServer(identity: identity, binding: .address(address), ownAddresses: ownAddresses) {
@@ -109,9 +129,10 @@ public final class LocalInstallServer: @unchecked Sendable {
             server.stop()
             throw LocalHTTPServer.ServerError(description: "The server was stopped while starting.")
         }
-        guard let manifestURL, let ipaURL else { throw LocalHTTPServer.ServerError(description: "No URL.") }
-        let manifest = try InstallManifest.plist(ipa: ipaURL, bundleID: bundleID, version: version, title: title)
-        lock.withLock { self.manifest = manifest }
+        guard let manifestURL else {
+            stop()
+            throw LocalHTTPServer.ServerError(description: "Could not build the manifest URL from the manifest server's address.")
+        }
 
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in self?.stop() }
         return manifestURL
@@ -128,30 +149,22 @@ public final class LocalInstallServer: @unchecked Sendable {
         continuation.finish()
     }
 
-    private func url(for name: String) -> URL? {
-        guard let port = lock.withLock({ port }) else { return nil }
-        return URL(string: "https://\(address):\(port)/\(token)/\(name)")
-    }
-
     private func route(_ request: HTTPRequest) -> HTTPResource? {
-        switch request.path {
-        case "/\(token)/manifest.plist":
-            return lock.withLock { manifest }.map { .data($0, contentType: "text/xml") }
-        case "/\(token)/app.ipa":
-            return HTTPResource(body: .file(ipa), contentType: "application/octet-stream", size: ipaSize)
-        default:
-            return nil
-        }
+        guard request.path == ipaPath else { return nil }
+        return HTTPResource(body: .file(ipa), contentType: "application/octet-stream", size: ipaSize)
     }
 
     private func responded(_ request: HTTPRequest, status: Int) {
-        if request.method == "GET", request.path == "/\(token)/manifest.plist", status == 200 {
-            continuation.yield(.manifestFetched)
+        guard request.path == ipaPath, (200..<300).contains(status) else { return }
+        let first = lock.withLock {
+            defer { ipaRequested = true }
+            return !ipaRequested
         }
+        if first { continuation.yield(.manifestFetched) }
     }
 
     private func bodySent(path: String, range: Range<Int64>) {
-        guard path == "/\(token)/app.ipa" else { return }
+        guard path == ipaPath else { return }
         let (sent, becameFull): (Int64, Bool) = lock.withLock {
             served.insert(range)
             let full = !fullyServed && served.covers(size: ipaSize)
@@ -160,27 +173,6 @@ public final class LocalInstallServer: @unchecked Sendable {
         }
         continuation.yield(.ipaBytesServed(sent: sent, total: ipaSize))
         if becameFull { continuation.yield(.ipaFullyServed) }
-    }
-}
-
-/// The plist iOS fetches for an itms-services install.
-enum InstallManifest {
-    static func plist(ipa: URL, bundleID: String, version: String, title: String) throws -> Data {
-        let manifest: [String: Any] = [
-            "items": [[
-                "assets": [[
-                    "kind": "software-package",
-                    "url": ipa.absoluteString,
-                ]],
-                "metadata": [
-                    "bundle-identifier": bundleID,
-                    "bundle-version": version,
-                    "kind": "software",
-                    "title": title,
-                ],
-            ] as [String: Any]],
-        ]
-        return try PropertyListSerialization.data(fromPropertyList: manifest, format: .xml, options: 0)
     }
 }
 
