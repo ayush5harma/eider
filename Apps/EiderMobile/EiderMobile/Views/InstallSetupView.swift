@@ -13,7 +13,10 @@ import UIKit
 ///    iPhone's Wi-Fi address for the IPA.
 /// Driven by the readiness check, which asks the manifest server and probes
 /// the local server with the system's own trust.
-struct InstallSetupSections: View {
+///
+/// This is the Manifest server method; `InstallSetupSections` below puts the
+/// method picker in front of it and of the Pairing setup.
+private struct ManifestSetupSections: View {
     @Environment(MobileModel.self) private var model
 
     var body: some View {
@@ -134,6 +137,17 @@ struct InstallSetupSections: View {
     }
 
     private func step(_ number: Int, _ title: String, detail: String) -> some View {
+        SetupStepRow(number: number, title: title, detail: detail)
+    }
+}
+
+/// One numbered step of a setup list.
+struct SetupStepRow: View {
+    let number: Int
+    let title: String
+    let detail: String
+
+    var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(number)")
                 .font(.subheadline.weight(.bold))
@@ -146,6 +160,39 @@ struct InstallSetupSections: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Settings > Install Method, then the setup of the chosen method.
+struct InstallSetupSections: View {
+    @Environment(MobileModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Section {
+            Picker("Install Method", selection: $model.installMethod) {
+                ForEach(InstallMethod.allCases) { method in
+                    Text(method.title).tag(method)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            .accessibilityLabel("Install Method")
+            .accessibilityIdentifier("installMethodPicker")
+        } header: {
+            Text("Install Method")
+        } footer: {
+            Text(model.installMethod == .manifestServer
+                 ? "Needs a manifest server on another computer, and Eider's certificate trusted on this iPhone."
+                 : "Installs through this iPhone's own installation service over a loopback VPN, with a pairing file. No manifest server and no Wi-Fi needed.")
+        }
+        // Switching method is the moment the answer for the new one is unknown.
+        .onChange(of: model.installMethod) { Task { await model.checkInstallSetup() } }
+
+        switch model.installMethod {
+        case .manifestServer: ManifestSetupSections()
+        case .pairing: PairingSetupSections()
+        }
     }
 }
 
@@ -299,10 +346,10 @@ struct InstallSetupView: View {
             }
             // Coming back from Settings is the moment the answer may have changed.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await model.checkInstallReadiness() } }
+                if phase == .active { Task { await model.checkInstallSetup() } }
             }
-            .onChange(of: model.installReadiness) { _, readiness in
-                if readiness == .ready { dismiss() }
+            .onChange(of: model.isInstallSetupReady) { _, ready in
+                if ready { dismiss() }
             }
         }
     }

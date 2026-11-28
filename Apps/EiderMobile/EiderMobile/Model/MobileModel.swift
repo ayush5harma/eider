@@ -37,6 +37,7 @@ final class MobileModel {
     @ObservationIgnored let certificateStore: CertificateStore
     @ObservationIgnored let signer: any SigningService
     @ObservationIgnored let installer: any DeviceInstaller
+    @ObservationIgnored let pairing: any PairingService
 
     var tab: AppTab = .browse
     /// Browse's navigation path, held here so a link can open an app page.
@@ -88,11 +89,23 @@ final class MobileModel {
     var isCheckingReadiness = false
     /// The manifest server's endpoint, from the Keychain; nil until the person adds one.
     var manifestServer: URL? = ManifestServerKeychain.load()
+    var installMethod: InstallMethod = .stored {
+        didSet { if installMethod != oldValue { installMethod.store() } }
+    }
+    /// Whether a pairing file is in the Keychain; the file itself is read only for one operation.
+    var hasPairingFile = PairingKeychain.load() != nil
+    /// The shortened host identifier of the stored pairing file, nil when it could not be read.
+    var pairingHost: String?
+    var pairingReadiness: PairingReadiness?
+    var isCheckingPairing = false
+    /// Why the last pairing file was refused (import, or a file left in Documents/Pairing).
+    var pairingMessage: String?
 
     init(
         paths: EiderPaths = EiderPaths(),
         signer: any SigningService = AppSigner(),
-        installer: any DeviceInstaller = AppInstaller()
+        installer: any DeviceInstaller = AppInstaller(),
+        pairing: any PairingService = AppPairing()
     ) {
         self.paths = paths
         self.sourceStore = SourceStore(paths: paths)
@@ -101,6 +114,7 @@ final class MobileModel {
         self.certificateStore = CertificateStore(paths: paths, signer: signer)
         self.signer = signer
         self.installer = installer
+        self.pairing = pairing
     }
 
     /// Everything from disk, once at launch; then stale sources in the background.
@@ -113,7 +127,7 @@ final class MobileModel {
         await reloadCatalog()
         await reloadLibrary()
         await reloadCertificates()
-        await checkInstallReadiness()
+        await checkInstallSetup()
         await refreshStaleSources()
     }
 
@@ -137,10 +151,22 @@ final class MobileModel {
             return
         }
         guard let link = DeepLink.parse(url) else {
+            // LocalDevVPN returns to `eider://` with no path after enabling the VPN: that is the
+            // app coming back to the front, not a link to refuse.
+            if Self.isBareReturnLink(url) { return }
             errorMessage = "Eider cannot open that link."
             return
         }
         pendingLink = link
+    }
+
+    /// `eider://`, `eider:///`, `eider://?x=y`: the scheme with no source or install path. A host
+    /// named source or install with nothing after it is a malformed link and still gets the message.
+    static func isBareReturnLink(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "eider" else { return false }
+        let host = url.host?.lowercased() ?? ""
+        if host.isEmpty { return true }
+        return !["source", "install"].contains(host) && url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
     }
 
     func confirmPendingLink() async {

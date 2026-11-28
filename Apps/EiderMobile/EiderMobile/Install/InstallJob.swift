@@ -42,6 +42,8 @@ final class InstallJob: Identifiable {
     private(set) var installDetail: String?
     /// iOS's fetch of the signed IPA, once it has started.
     private(set) var installFraction: Double?
+    /// What the progress bar's spoken label says it is measuring.
+    private(set) var installProgressLabel = "Installing"
     private(set) var installed: InstalledApp?
     private(set) var failure: String?
 
@@ -57,6 +59,7 @@ final class InstallJob: Identifiable {
         installed = nil
         installDetail = nil
         installFraction = nil
+        installProgressLabel = "Installing"
         phases = Dictionary(uniqueKeysWithValues: Step.allCases.map { ($0, .waiting) })
         defer { isRunning = false }
 
@@ -83,28 +86,12 @@ final class InstallJob: Identifiable {
             // Signing may have changed these; the manifest must match the signed app.
             let signedInfo = (try? await Task.detached { try BundleInfo.read(appAt: appURL) }.value) ?? info
             try await step(.install) {
-                guard let manifestServer = model.manifestServer else { throw InstallJobError.noManifestServer }
-                installDetail = "Starting the local server..."
-                let stages = try await installer.install(
-                    ipaAt: signed, bundleIdentifier: signedInfo.bundleID,
-                    version: signedInfo.version, title: signedInfo.name, manifestServer: manifestServer)
-                var handed = false
-                for try await stage in stages {
-                    switch stage {
-                    case .opened:
-                        installDetail = "Confirm Install in the alert iOS shows."
-                    case .manifestFetched:
-                        // iOS asked for the IPA: it has the manifest from the manifest server.
-                        installDetail = "iOS is fetching the app..."
-                    case .downloading(let sent, let total):
-                        installFraction = total > 0 ? Double(sent) / Double(total) : nil
-                    case .handedToIOS:
-                        handed = true
-                        installFraction = 1
-                    }
+                switch model.installMethod {
+                case .manifestServer:
+                    try await installThroughManifestServer(signed, info: signedInfo, model: model)
+                case .pairing:
+                    try await installThroughPairing(signed, info: signedInfo, model: model)
                 }
-                guard handed else { throw InstallJobError.notHandedOver }
-                installDetail = "Handed to iOS: confirm Install in the alert if it is still showing, then watch the Home Screen."
             }
 
             let record = InstalledApp(
@@ -117,6 +104,70 @@ final class InstallJob: Identifiable {
         } catch {
             if failure == nil { failure = error.localizedDescription }
             return nil
+        }
+    }
+
+    private func installThroughManifestServer(_ signed: URL, info: BundleInfo, model: MobileModel) async throws {
+        guard let manifestServer = model.manifestServer else { throw InstallJobError.noManifestServer }
+        installDetail = "Starting the local server..."
+        installProgressLabel = "iOS is fetching the app"
+        let stages = try await model.installer.install(
+            ipaAt: signed, bundleIdentifier: info.bundleID,
+            version: info.version, title: info.name, manifestServer: manifestServer)
+        var handed = false
+        for try await stage in stages {
+            switch stage {
+            case .opened:
+                installDetail = "Confirm Install in the alert iOS shows."
+            case .manifestFetched:
+                // iOS asked for the IPA: it has the manifest from the manifest server.
+                installDetail = "iOS is fetching the app..."
+            case .downloading(let sent, let total):
+                installFraction = total > 0 ? Double(sent) / Double(total) : nil
+            case .handedToIOS:
+                handed = true
+                installFraction = 1
+            }
+        }
+        guard handed else { throw InstallJobError.notHandedOver }
+        installDetail = "Handed to iOS: confirm Install in the alert if it is still showing, then watch the Home Screen."
+    }
+
+    /// No manifest and no iOS alert: the install service takes the IPA, reports its own progress
+    /// and returns once the app is installed.
+    private func installThroughPairing(_ signed: URL, info: BundleInfo, model: MobileModel) async throws {
+        guard let pairingFile = PairingKeychain.load() else { throw InstallJobError.noPairingFile }
+        installDetail = "Connecting..."
+        installProgressLabel = "Installing through pairing"
+        try await model.pairing.install(
+            ipaAt: signed, bundleIdentifier: info.bundleID, pairingFile: pairingFile
+        ) { [weak self] stage in
+            Task { @MainActor in self?.apply(stage) }
+        }
+        installFraction = 1
+        installDetail = Self.installedText
+    }
+
+    private static let installedText = "Installed"
+
+    private func apply(_ stage: PairingStage) {
+        // The service's last callback can land after its call returned; "Installed" wins.
+        guard installed == nil, installDetail != Self.installedText else { return }
+        switch stage {
+        case .connecting:
+            installDetail = "Connecting..."
+            installFraction = nil
+        case .uploading(let sent, let total):
+            let fraction = total > 0 ? min(1, Double(sent) / Double(total)) : nil
+            installFraction = fraction
+            installDetail = fraction.map { "Uploading \(Int($0 * 100))%" } ?? "Uploading..."
+        case .installing(let percent):
+            let clamped = max(0, min(100, percent))
+            installFraction = Double(clamped) / 100
+            installDetail = "Installing \(clamped)%"
+        case .finished:
+            installFraction = 1
+            installDetail = Self.installedText
         }
     }
 
@@ -147,9 +198,12 @@ enum InstallJobError: LocalizedError {
     case notHandedOver
     /// Cleared between the readiness check and the Install step.
     case noManifestServer
+    /// Removed between the readiness check and the Install step.
+    case noPairingFile
 
     var errorDescription: String? {
         switch self {
+        case .noPairingFile: "Import a pairing file in Settings > Install on this iPhone, then install again."
         case .notHandedOver: "iOS did not fetch the app. If you tapped Cancel in the alert, install again."
         case .noManifestServer: "Add your manifest server in Settings > Install on this iPhone, then install again."
         }

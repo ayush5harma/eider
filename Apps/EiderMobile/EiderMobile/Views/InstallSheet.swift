@@ -87,15 +87,18 @@ struct InstallSheet: View {
                     StepList(job: job)
                     if let fraction = job.installFraction, job.installed == nil {
                         ProgressView(value: fraction)
-                            .accessibilityLabel("iOS is fetching the app, \(Int(fraction * 100)) percent")
+                            .accessibilityLabel("\(job.installProgressLabel), \(Int(fraction * 100)) percent")
+                            .accessibilityIdentifier("installProgress")
                     }
                     if let detail = job.installDetail {
                         Label(detail, systemImage: job.installed == nil ? "info.circle" : "checkmark.circle.fill")
                             .font(.callout)
                             .foregroundStyle(job.installed == nil ? Color.secondary : Color.green)
+                            .accessibilityIdentifier("installDetail")
                     }
                     if let message = validationMessage ?? job.failure {
                         Text(message).font(.callout).foregroundStyle(.red)
+                            .accessibilityIdentifier("installFailure")
                     }
                 }
             }
@@ -123,6 +126,7 @@ struct InstallSheet: View {
                     .primaryActionStyle()
                     .controlSize(.large)
                     .disabled(selectedCertificate == nil || job.isRunning)
+                    .accessibilityIdentifier("installButton")
                     .padding(.horizontal)
                     .padding(.vertical, 8)
                 }
@@ -165,13 +169,14 @@ struct InstallSheet: View {
             ipa: ipa, ipaURL: model.library.fileURL(of: ipa), certificate: certificate, options: options)
         Task {
             // Not trusted yet: the one-time setup, not a failure at the last step.
-            await model.checkInstallReadiness()
-            // No Wi-Fi is not something the setup can fix: say so here.
-            if model.installReadiness == .needsWiFi {
+            await model.checkInstallSetup()
+            // No Wi-Fi is not something the setup can fix: say so here. Pairing goes through the
+            // loopback VPN and needs no Wi-Fi.
+            if model.installMethod == .manifestServer, model.installReadiness == .needsWiFi {
                 validationMessage = InstallReadiness.wifiMessage
                 return
             }
-            guard model.installReadiness == .ready else {
+            guard model.isInstallSetupReady else {
                 settingUp = true
                 return
             }
