@@ -43,3 +43,49 @@ enum CertificateKeychain {
         SecItemDelete(query as CFDictionary)
     }
 }
+
+/// The manifest server's endpoint, one generic-password item. Its path holds
+/// a secret (anyone with the URL can make the server describe any IPA), so it
+/// lives here rather than in a plist, this device only and after first unlock.
+enum ManifestServerKeychain {
+    private static let service = "io.github.ayush5harma.EideriOS.manifest-server"
+    private static let account = "base"
+
+    static func set(_ url: URL) throws {
+        delete()
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: Data(url.absoluteString.utf8),
+        ]
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else { throw CertificateError.keychain(status) }
+    }
+
+    /// nil when none is stored (or the stored value no longer parses).
+    static func load() -> URL? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else {
+            return nil
+        }
+        return URL(string: String(decoding: data, as: UTF8.self))
+    }
+
+    static func delete() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}

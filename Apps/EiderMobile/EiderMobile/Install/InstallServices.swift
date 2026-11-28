@@ -39,8 +39,15 @@ enum RevocationState: Sendable, Equatable {
     case unavailable(String)
 }
 
-/// Whether this device trusts Eider's local install server yet.
+/// Whether this device can install yet: a manifest server, and trust in Eider's local install
+/// server.
 enum InstallReadiness: Sendable, Equatable {
+    /// No manifest server set. iOS refuses a manifest the iPhone serves itself ("The manifest
+    /// URL isn't external"), so the manifest has to come from another computer.
+    case needsManifestServer
+    /// The manifest server is set but did not answer as one (no connection, or a status other
+    /// than 200 or 400).
+    case manifestServerUnreachable
     /// No root certificate made yet.
     case notSetUp
     /// The certificate on this device predates installs from the Wi-Fi address: it only covers
@@ -79,11 +86,13 @@ protocol DeviceInstaller: Sendable {
     /// Unpacks into `directory` and returns the .app inside Payload.
     func unpack(ipaAt ipaURL: URL, into directory: URL) async throws -> URL
     func package(appAt appURL: URL, into ipaURL: URL) async throws
-    func readiness() async -> InstallReadiness
+    /// `manifestServer` is the stored manifest server endpoint, nil when none is set.
+    func readiness(manifestServer: URL?) async -> InstallReadiness
     /// Opens Eider's root certificate as a profile download in Safari.
     func openSetupProfile() async throws
     /// The stream ends after `.handedToIOS`; the server keeps the file open
-    /// for a short grace period after that.
-    func install(ipaAt ipaURL: URL, bundleIdentifier: String, version: String, title: String)
+    /// for a short grace period after that. The manifest comes from
+    /// `manifestServer`, the IPA from this device.
+    func install(ipaAt ipaURL: URL, bundleIdentifier: String, version: String, title: String, manifestServer: URL)
         async throws -> AsyncThrowingStream<InstallStage, Error>
 }
