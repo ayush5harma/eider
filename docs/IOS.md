@@ -31,7 +31,7 @@ All in this repository's Package.swift. iOS 17 is the minimum. Liquid Glass is u
 |---|---|---|
 | `EiderCore` | macOS, iOS | Platform-neutral code moved out of EiderKit: Catalog, Downloads, update matching, version compare, paths, image cache, BrowseIndex/BrowseFilter, SourceListIO. EiderKit depends on it and re-exports it, so the Mac code keeps compiling unchanged. |
 | `EiderSign` | macOS, iOS | Signing: the vendored zsign C++ sources (MIT, zhlynn/zsign) built as a C++ target against OpenSSL (krzyzanowskim/OpenSSL, binary xcframework), behind a small Swift API. Also certificate import and inspection (p12, mobileprovision, OCSP). |
-| `EiderInstall` | macOS, iOS | Unpack and repack IPAs (ZIPFoundation, MIT), the loopback HTTPS server, the install manifest, and the itms-services hand-off. |
+| `EiderInstall` | macOS, iOS | Unpack and repack IPAs (ZIPFoundation, MIT), the device's own HTTPS server for the IPA, the manifest server URL, and the itms-services hand-off. |
 | `Apps/EiderMobile` | iOS | The SwiftUI app: an Xcode project that depends on the three libraries above. |
 
 EiderKit, the `eider` CLI and the Mac app stay macOS-only.
@@ -55,26 +55,59 @@ appstored: <ERROR> Could not load download manifest with underlying error: Error
 appstored: alert "Cannot connect to 127.0.0.1"
 ```
 
-A private LAN address (the run above) counts as external. Feather moved to an external manifest host for the same reason, and a third-party report says even loopback IPA URLs may stall on iOS 27.2, so Eider serves neither the manifest nor the IPA from loopback: both come from the iPhone's own Wi-Fi/LAN address, answered only to the iPhone itself.
+**Measured later on 2026-11-28, same iPhone: the manifest must come from another host; the IPA may come from the iPhone.**
+
+- appstored refuses a manifest served by the iPhone at its own Wi-Fi address too, not only at loopback: `https://192.168.1.50:<port>/...` got the same "The manifest URL isn't external" (ASDErrorDomain 850), shown as "Cannot connect to 192.168.1.50".
+- It accepts a manifest from another host whose asset URL points back at the iPhone. The Mac served `https://192.168.1.117:8443/manifest-ext.plist` (certificate from a root the user trusted) with asset url `https://192.168.1.50:61901/<token>/app.ipa`; Eider's server on the iPhone served the IPA at its Wi-Fi address (a connection from the iPhone to itself, which the server accepts), and iTorrent 2.2.0, signed on the phone by Eider with the owner's certificate, installed and launched.
+
+So the rule is: the manifest URL must be external to the device; the asset URL in it need not be. Feather moved to an external manifest host for the same reason. Eider serves only the IPA, from the iPhone's own Wi-Fi/LAN address (never loopback: a third-party report says loopback IPA URLs may stall on iOS 27.2), answered only to the iPhone itself, and takes the manifest from a **manifest server** the owner runs on another computer.
+
+### The manifest server
+
+An HTTPS endpoint on another host, set once in Settings > Install on this iPhone as a base URL such as `https://<host>/eider/manifest/<secret>.plist`. The path carries a secret, so the app keeps the URL in the Keychain (this device only, after first unlock) and shows it masked (`https://<host>:<port>/••••.plist`), with Paste, Save, Edit and Clear. Eider refuses a base that is not https, has a fragment, or names this iPhone (loopback, `localhost` or one of its own addresses), since appstored would refuse it.
+
+For each install Eider opens
+
+```
+itms-services://?action=download-manifest&url=<percent-encoded manifest URL>
+manifest URL = <base>?bundle=<id>&version=<v>&title=<t>&url=<ipa url>
+ipa url      = https://<wifi ip>:<port>/<32 lowercase hex token>/app.ipa
+```
+
+with each query value percent-encoded (RFC 3986 unreserved characters only), and `&` instead of `?` when the base already has a query. The manifest server answers with the usual manifest plist (`InstallManifest` in `ManifestServer.swift`): one item, one `software-package` asset whose url is `url`, and metadata `bundle-identifier`, `bundle-version`, `kind` = `software`, `title`. It needs no copy of the IPA. Its certificate must be trusted by the iPhone (a public one, or a root the user installed and trusted). A manifest server that refuses anything but an IPA URL of exactly that shape, on a private address, is fine: Eider's own URLs always have it.
+
+Readiness asks the manifest server first: a GET of the base with a made-up but valid-looking query (`bundle=dev.eider.reachability-check`, an IPA URL of the right shape). 200 or 400 counts as answering; any other status (a wrong secret gives 404 on most servers) or no connection is "Manifest Server Not Answering".
 
 One trap: OpenSSL treats a leaf whose subject CN looks like a host or IP as a DNS name and fails the name constraints ("permitted subtree violation"). The leaf's CN is therefore "Eider local server", and the names go only in subjectAltName.
 
 Eider's method, built in `EiderInstall`:
 
 1. **Root.** On first use `LocalRootAuthority` creates a P-256 key in the Keychain (this device only, never exported) and a self-signed root, subject "Eider Local Install (<8 hex chars>)": CA:TRUE pathlen 0 critical, keyUsage keyCertSign + cRLSign, critical nameConstraints permitting only IP `127.0.0.1/32`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10` and DNS `localhost`. Even a leaked key could not vouch for a public site. A root without the private ranges (made before 2026-11-28 for loopback only) counts as not set up (`hasOutdatedRoot()` tells the app), and the next profile download replaces it.
-2. **Trust, once.** `LocalInstaller.openProfileInstall()` serves the root as an unsigned `.mobileconfig` (`com.apple.security.root`, display name "Eider Local Install") from a plain-HTTP loopback listener at `http://127.0.0.1:<port>/root.mobileconfig`, since Safari must fetch it before the root is trusted (Safari taking a loopback profile URL is not yet verified on the device). The user installs the profile and turns on full trust in Settings > General > About > Certificate Trust Settings. `status()` reports `.notSetUp`, `.needsWiFi`, `.needsTrust`, `.unreachable` (no connection at all, most likely Local Network off) or `.ready`; `.ready` means a URLSession with the default system trust (no delegate) reached the app's own HTTPS server at the Wi-Fi address, the same address and trust appstored uses. The probe is also what raises iOS's Local Network prompt (`NSLocalNetworkUsageDescription`), during setup rather than mid-install.
+2. **Trust, once.** `LocalInstaller.openProfileInstall()` serves the root as an unsigned `.mobileconfig` (`com.apple.security.root`, display name "Eider Local Install") from a plain-HTTP loopback listener at `http://127.0.0.1:<port>/root.mobileconfig`, since Safari must fetch it before the root is trusted (Safari taking a loopback profile URL is not yet verified on the device). The user installs the profile and turns on full trust in Settings > General > About > Certificate Trust Settings. `status()` reports `.notSetUp`, `.needsWiFi`, `.needsTrust`, `.unreachable` (no connection at all, most likely Local Network off) or `.ready` (the app adds the manifest server's two states in front: none set, or not answering); `.ready` means a URLSession with the default system trust (no delegate) reached the app's own HTTPS server at the Wi-Fi address, the same address and trust appstored uses. The probe is also what raises iOS's Local Network prompt (`NSLocalNetworkUsageDescription`), during setup rather than mid-install.
 3. **Server certificate.** A leaf issued by the root: CN "Eider local server", SAN IP `127.0.0.1`, the current Wi-Fi address and DNS `localhost`, EKU serverAuth, 300 days (iOS refuses more than 825 for a user-trusted root), re-issued when under 30 days remain, the root changed, or the Wi-Fi address is not in its SAN. It and its key sit in the Keychain and are used as a `SecIdentity` by Network.framework TLS.
-4. **Install.** `LocalInstaller.install(ipa:bundleID:version:title:)`:
+4. **Install.** `LocalInstaller.install(ipa:bundleID:version:title:manifestBase:)`:
    - picks the address with `LocalNetwork.installAddress()`: an up, non-loopback IPv4 address in one of the private ranges, en0 (Wi-Fi) first, then the hotspot bridge (172.20.10.x) and other interfaces; without one it throws "Connect to Wi-Fi to install: iOS will not take an install link served from this iPhone's internal address.";
-   - serves `/<token>/manifest.plist` and `/<token>/app.ipa` (GET, HEAD, single byte ranges) from an `NWListener` bound to that address, on a random port, with a random 128-bit token per install; anything else is a 404. Every connection whose remote address is not loopback or one of the iPhone's own interface addresses (getifaddrs, per connection) is cancelled before a byte is read, so nothing else on the Wi-Fi gets an answer;
-   - opens `itms-services://?action=download-manifest&url=<percent-encoded https://<wifi-ip>:<port>/<token>/manifest.plist>`;
-   - keeps the app alive with a background task, reports progress, and reports "handed to iOS" once every byte of the IPA was served; the server stops 10 s later, or after 15 minutes without that;
+   - serves only `/<token>/app.ipa` (GET, HEAD, single byte ranges) from an `NWListener` bound to that address, on a random port, with a random 128-bit token per install; anything else, the old `/<token>/manifest.plist` included, is a 404. Every connection whose remote address is not loopback or one of the iPhone's own interface addresses (getifaddrs, per connection) is cancelled before a byte is read, so nothing else on the Wi-Fi gets an answer;
+   - opens the itms-services link to the manifest server's URL for that IPA (above);
+   - keeps the app alive with a background task, reports progress ("manifest fetched" when iOS first asks for the IPA, since the manifest is no longer Eider's to see), and reports "handed to iOS" once every byte of the IPA was served; the server stops 10 s later, or after 15 minutes without that;
    - logs each accepted and refused connection and each request to the unified log (subsystem `io.github.ayush5harma.EideriOS`, category `install`; the token stays private), so the device syslog shows the flow.
 5. **Signing in between.** `LocalInstaller.prepareSignedIPA(from:sign:)` unpacks the IPA, calls the signer on `Payload/<name>.app` and repacks it uncompressed, keeping permissions and symlinks. Entries with absolute paths, `..` or symlinks out of the work directory are refused. A 99.8 MB IPA packed in 0.39 s and unpacked in 0.5 s on the Mac (debug build, 2026-11-28; `EIDER_TIMING=1 swift test --filter IPAArchiveTimingTests`); the device is not measured yet.
 
-The parts are tested on the Mac (`swift test --filter EiderInstall`), where the Mac's own LAN address stands in for the iPhone's; a connection from another machine is simulated by telling the server that only loopback is its own. The whole flow from the LAN address inside the app on the device is still to be run.
+The parts are tested on the Mac (`swift test --filter EiderInstall`), where the Mac's own LAN address stands in for the iPhone's and the test plays the manifest server's part from the URL's query; a connection from another machine is simulated by telling the server that only loopback is its own. The whole flow with the manifest server set inside the app on the device is still to be run (the measured install above used a hand-written manifest on the Mac).
 
-The app's setup opens Settings through the Settings URL scheme (Eider is sideloaded; `openSettingsURLString` only opens Eider's own page): the trust step tries `App-prefs:General&path=About/CERT_TRUST_SETTINGS`, `prefs:root=General&path=About/CERT_TRUST_SETTINGS`, then `App-prefs:`; the profile step tries `App-prefs:` (the Settings root lists "Profile Downloaded") and then `App-prefs:General&path=ManagedConfigurationList`. Which page each lands on is not verified on iOS 27 yet, so the written path stays beside each button.
+The app's setup lists three steps in order: 1) add the manifest server, 2) install Eider's certificate (the profile), 3) trust it; then Check Again. Ready means all three are in place.
+
+It opens Settings through the Settings URL scheme (Eider is sideloaded; `openSettingsURLString` only opens Eider's own page), trying candidates in order, stopping at the first `open` that returns true and logging which. Measured on iOS 27.3, 2026-11-28, by opening each URL in Settings:
+
+| URL | Lands on |
+|---|---|
+| `prefs:root=General&path=About/CERT_TRUST_SETTINGS` | Certificate Trust Settings |
+| `settings-navigation://com.apple.Settings.General/About/CERT_TRUST_SETTINGS` | Certificate Trust Settings |
+| `App-prefs:root=General&path=About/CERT_TRUST_SETTINGS` | the Apps page (wrong) |
+| `App-prefs:General&path=About/CERT_TRUST_SETTINGS` | the Apps page (wrong) |
+| `App-prefs:` | the Settings root, "Profile Downloaded" at the top after Safari downloaded a profile |
+
+So the trust step tries `prefs:root=General&path=About/CERT_TRUST_SETTINGS`, then `settings-navigation://com.apple.Settings.General/About/CERT_TRUST_SETTINGS`, then `App-prefs:`; the profile step tries `App-prefs:`, then `prefs:root=General&path=ManagedConfigurationList` (not measured). The written path stays beside each button in case a later iOS moves a page.
 
 ## Testing
 

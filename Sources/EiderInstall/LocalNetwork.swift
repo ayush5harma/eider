@@ -21,10 +21,11 @@ public struct DeviceAddress: Sendable, Hashable, CustomStringConvertible {
 /// Measured on an iPhone 17 Pro, iOS 27.3, 2026-11-28 (device syslog): appstored refuses a
 /// manifest served from loopback before it connects at all:
 /// `The manifest URL isn't external: https://127.0.0.1:<port>/<token>/manifest.plist`
-/// (ASDErrorDomain 850 "Invalid manifest URL"). The same day an install from a manifest and IPA
-/// served at the Mac's LAN address 192.168.1.117 succeeded, so a private LAN address counts as
-/// external. The server therefore listens on the device's own Wi-Fi/LAN address and answers
-/// only connections that come from the device itself.
+/// (ASDErrorDomain 850 "Invalid manifest URL"), and later the same day refused one served at the
+/// iPhone's own Wi-Fi address with the same message. It did fetch the IPA from the iPhone's
+/// Wi-Fi address when a manifest on another host (the Mac, 192.168.1.117) named it there, so
+/// the manifest comes from a `ManifestServer` and this server, on the device's own Wi-Fi/LAN
+/// address, serves only the IPA and answers only connections that come from the device itself.
 public enum LocalNetwork {
     /// One interface address as getifaddrs reports it.
     public struct InterfaceAddress: Sendable, Equatable {
