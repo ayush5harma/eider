@@ -373,6 +373,7 @@ dependencies = [
  "idevice",
  "plist",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -31,6 +31,10 @@ idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c8fff6d7fb2690ea
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util", "fs"] }
 plist = "1.8"
+# Compiles every tracing call out. idevice's RpPairingFile::from_bytes debug-logs the whole
+# pairing dictionary, private key included; with no subscriber that prints nothing today,
+# and this keeps it so if one is ever added (features unify across the dependency graph).
+tracing = { version = "0.1", features = ["max_level_off", "release_max_level_off"] }
 
 [profile.release]
 opt-level = "s"

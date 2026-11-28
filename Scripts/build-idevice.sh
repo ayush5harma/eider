@@ -7,9 +7,11 @@
 #   Scripts/build-idevice.sh
 #
 #   OUT           Output directory (default build/idevice, ignored by git).
-#   CARGO_TARGET_DIR  Cargo's build directory (default ~/.cache/eider-dev/idevice-target,
-#                 outside the repository; about 1 GB for the three targets, measured
-#                 2026-11-28). KEEP_TARGET=1 keeps it; otherwise it is deleted at the end.
+#   IDEVICE_TARGET_DIR  Cargo's build directory for this script only (default
+#                 ~/.cache/eider-dev/idevice-target, outside the repository; about 330 MB
+#                 with the three targets, measured 2026-11-28). It is deleted at the end
+#                 unless KEEP_TARGET=1; a CARGO_TARGET_DIR from the environment is ignored,
+#                 so a shared Cargo cache is never deleted.
 #   RUST_TOOLCHAIN    rustup toolchain (default stable; 1.100.1 on 2026-11-28).
 #
 # Needs rustup with the three targets. The nix rustc has no iOS standard library, so without
@@ -24,7 +26,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRATE="$ROOT/Native/IDeviceFFI"
 OUT="${OUT:-$ROOT/build/idevice}"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/eider-dev/idevice-target}"
+export CARGO_TARGET_DIR="${IDEVICE_TARGET_DIR:-$HOME/.cache/eider-dev/idevice-target}"
 TOOLCHAIN="${RUST_TOOLCHAIN:-stable}"
 # Must match the rev in Native/IDeviceFFI/Cargo.toml.
 IDEVICE_COMMIT="c8fff6d7fb2690eaeb591ce510754effa7b1e19b"
@@ -46,6 +48,14 @@ echo "rustc: $(rustup run "$TOOLCHAIN" rustc --version)"
 # The same minimums as Package.swift, so the linker does not warn about newer objects.
 export IPHONEOS_DEPLOYMENT_TARGET=17.0
 export MACOSX_DEPLOYMENT_TARGET=14.0
+
+# eider_idevice_version() names the commit the binary was built from (build.rs).
+EIDER_SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
+if [ -n "$(git -C "$ROOT" status --porcelain -- Native/IDeviceFFI)" ]; then
+  EIDER_SOURCE_COMMIT="$EIDER_SOURCE_COMMIT-dirty"
+fi
+export EIDER_SOURCE_COMMIT
+echo "source: $EIDER_SOURCE_COMMIT"
 
 for target in "${TARGETS[@]}"; do
   echo "building $target"

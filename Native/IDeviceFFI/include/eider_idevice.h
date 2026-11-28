@@ -61,7 +61,10 @@ int32_t eider_idevice_check(const char *host, uint16_t port,
                             uint32_t timeout_ms, char **out_message);
 
 /// Uploads the IPA to PublicStaging/<bundle_id>.ipa over AFC and installs it with
-/// installation_proxy. connect_timeout_ms bounds everything up to the RSD handshake.
+/// installation_proxy. connect_timeout_ms bounds the TCP connect (then the result is
+/// UNREACHABLE) and, separately, pairing, tunnel and RSD (then TIMEOUT). The upload is
+/// bounded by 60 s plus 1 s per 256 KiB, the install by 300 s plus 1 s per MiB, so a phone
+/// that stops answering ends the call with TIMEOUT instead of blocking it.
 int32_t eider_idevice_install(const char *host, uint16_t port,
                               const uint8_t *pairing, size_t pairing_len,
                               uint32_t connect_timeout_ms,
@@ -69,7 +72,8 @@ int32_t eider_idevice_install(const char *host, uint16_t port,
                               eider_idevice_progress_cb progress, void *context,
                               char **out_message);
 
-/// Uninstalls the app with this bundle id through installation_proxy.
+/// Uninstalls the app with this bundle id through installation_proxy (bounded at 120 s after
+/// the tunnel is up).
 int32_t eider_idevice_uninstall(const char *host, uint16_t port,
                                 const uint8_t *pairing, size_t pairing_len,
                                 uint32_t connect_timeout_ms,
@@ -77,7 +81,8 @@ int32_t eider_idevice_uninstall(const char *host, uint16_t port,
 
 void eider_idevice_free_string(char *message);
 
-/// A static string naming this library and the idevice commit it was built from.
+/// A static string naming this library, the Eider commit its source came from (with
+/// "-dirty" if Native/IDeviceFFI had local changes) and the idevice commit.
 const char *eider_idevice_version(void);
 
 #ifdef __cplusplus

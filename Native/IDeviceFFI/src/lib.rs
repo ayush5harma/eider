@@ -73,18 +73,19 @@ impl Failure {
         Self { code, message: message.into() }
     }
 
-    /// Classifies an error from connecting, pairing or the tunnel.
-    fn from_connect(error: IdeviceError) -> Self {
+    /// Classifies an error from pairing or the tunnel, once the TCP connection is up: the
+    /// device answered, so a socket error here is a dropped tunnel, not an unreachable phone,
+    /// and only an explicit refusal of the pairing is reported as one.
+    fn after_connect(error: IdeviceError) -> Self {
         match error {
             IdeviceError::RemotePairing(RemotePairingError::PairVerifyFailed) => Self::new(
                 EIDER_IDEVICE_ERR_PAIRING_REJECTED,
                 "the iPhone did not accept this pairing file (pair-verify failed)",
             ),
-            IdeviceError::RemotePairing(other) => {
-                Self::new(EIDER_IDEVICE_ERR_PAIRING_REJECTED, format!("pairing: {other}"))
+            IdeviceError::RemotePairing(RemotePairingError::PairingRejected(reason)) => {
+                Self::new(EIDER_IDEVICE_ERR_PAIRING_REJECTED, format!("pairing rejected: {reason}"))
             }
-            IdeviceError::Socket(e) => Self::new(EIDER_IDEVICE_ERR_UNREACHABLE, e.to_string()),
-            IdeviceError::Timeout => Self::new(EIDER_IDEVICE_ERR_TIMEOUT, "timed out"),
+            IdeviceError::Timeout => Self::new(EIDER_IDEVICE_ERR_TIMEOUT, "the iPhone stopped answering"),
             other => Self::new(EIDER_IDEVICE_ERR_TUNNEL, other.to_string()),
         }
     }
@@ -125,16 +126,39 @@ async fn with_timeout<T>(
     }
 }
 
-/// TCP connect -> pair-verify (never pair-setup) -> TLS-PSK tunnel -> RSD handshake.
-async fn open_session(address: SocketAddr, pairing: &mut RpPairingFile) -> Outcome<Session> {
-    let stream = tokio::net::TcpStream::connect(address)
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_UNREACHABLE, format!("connect {address}: {e}")))?;
-    let mut client = RemotePairingClient::new(RpPairingSocket::new(stream), SENDING_HOST);
-    client.attempt_pair_verify().await.map_err(Failure::from_connect)?;
-    client.validate_pairing(pairing).await.map_err(Failure::from_connect)?;
+/// TCP connect -> pair-verify (never pair-setup) -> TLS-PSK tunnel -> RSD handshake. `limit`
+/// bounds the TCP connect (exceeding it is "unreachable") and, separately, everything after it
+/// (exceeding that is a timeout of a phone that did answer).
+async fn open_session(
+    address: SocketAddr,
+    pairing: &mut RpPairingFile,
+    limit: Duration,
+) -> Outcome<Session> {
+    let stream = match tokio::time::timeout(limit, tokio::net::TcpStream::connect(address)).await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => {
+            return Err(Failure::new(EIDER_IDEVICE_ERR_UNREACHABLE, format!("connect {address}: {e}")));
+        }
+        Err(_) => {
+            return Err(Failure::new(
+                EIDER_IDEVICE_ERR_UNREACHABLE,
+                format!("no answer from {address} within {} ms", limit.as_millis()),
+            ));
+        }
+    };
+    with_timeout(limit, "pairing and tunnel setup", establish(stream, address, pairing)).await
+}
 
-    let tunnel_port = client.create_tcp_listener().await.map_err(Failure::from_connect)?;
+async fn establish(
+    stream: tokio::net::TcpStream,
+    address: SocketAddr,
+    pairing: &mut RpPairingFile,
+) -> Outcome<Session> {
+    let mut client = RemotePairingClient::new(RpPairingSocket::new(stream), SENDING_HOST);
+    client.attempt_pair_verify().await.map_err(Failure::after_connect)?;
+    client.validate_pairing(pairing).await.map_err(Failure::after_connect)?;
+
+    let tunnel_port = client.create_tcp_listener().await.map_err(Failure::after_connect)?;
     let mut tunnel_address = address;
     tunnel_address.set_port(tunnel_port);
     let tunnel_stream = tokio::net::TcpStream::connect(tunnel_address).await.map_err(|e| {
@@ -142,7 +166,7 @@ async fn open_session(address: SocketAddr, pairing: &mut RpPairingFile) -> Outco
     })?;
     let tunnel = connect_tls_psk_tunnel_native(tunnel_stream, client.encryption_key())
         .await
-        .map_err(Failure::from_connect)?;
+        .map_err(Failure::after_connect)?;
 
     let parse = |s: &str| -> Outcome<IpAddr> {
         s.parse()
@@ -181,24 +205,32 @@ fn require_services(handshake: &RsdHandshake) -> Outcome<()> {
     Ok(())
 }
 
+/// Upper bounds for the steps after connecting. Without them a phone that sleeps or a VPN
+/// switched off mid-install leaves the call blocked for good: idevice's installation_proxy
+/// waits on a read, and the tunnel's TCP stack only gives up on unacknowledged writes. The
+/// floors are generous: a 21 KB IPA uploaded and installed in about 1 s on 2026-11-28.
+const UPLOAD_BASE: Duration = Duration::from_secs(60);
+const UPLOAD_FLOOR_BYTES_PER_SECOND: u64 = 256 * 1024;
+const INSTALL_BASE: Duration = Duration::from_secs(300);
+const INSTALL_FLOOR_BYTES_PER_SECOND: u64 = 1024 * 1024;
+const UNINSTALL_LIMIT: Duration = Duration::from_secs(120);
+const CLEANUP_LIMIT: Duration = Duration::from_secs(10);
+
+fn limit_for(base: Duration, bytes: u64, floor_bytes_per_second: u64) -> Duration {
+    base + Duration::from_secs(bytes / floor_bytes_per_second)
+}
+
+fn upload_error(what: &str, e: IdeviceError) -> Failure {
+    Failure::new(EIDER_IDEVICE_ERR_UPLOAD, format!("{what}: {e}"))
+}
+
 async fn upload(
     session: &mut Session,
-    ipa: &PathBuf,
+    file: &mut tokio::fs::File,
+    total: i64,
     remote_path: &str,
     progress: &Progress,
 ) -> Outcome<()> {
-    let upload_error = |what: &str, e: IdeviceError| {
-        Failure::new(EIDER_IDEVICE_ERR_UPLOAD, format!("{what}: {e}"))
-    };
-    let mut file = tokio::fs::File::open(ipa)
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_LOCAL_FILE, format!("{}: {e}", ipa.display())))?;
-    let total = file
-        .metadata()
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_LOCAL_FILE, format!("{}: {e}", ipa.display())))?
-        .len() as i64;
-
     let mut afc = AfcClient::connect_rsd(&mut session.adapter, &mut session.handshake)
         .await
         .map_err(|e| upload_error("AFC connect", e))?;
@@ -213,20 +245,58 @@ async fn upload(
     let mut buffer = vec![0u8; UPLOAD_CHUNK];
     let mut sent: i64 = 0;
     progress.report(EIDER_IDEVICE_PHASE_UPLOADING, 0, total);
-    loop {
-        let n = file
-            .read(&mut buffer)
-            .await
-            .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_LOCAL_FILE, format!("read IPA: {e}")))?;
-        if n == 0 {
-            break;
+    let written: Outcome<()> = async {
+        loop {
+            let n = file
+                .read(&mut buffer)
+                .await
+                .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_LOCAL_FILE, format!("read IPA: {e}")))?;
+            if n == 0 {
+                return Ok(());
+            }
+            remote.write_entire(&buffer[..n]).await.map_err(|e| upload_error("write", e))?;
+            sent += n as i64;
+            progress.report(EIDER_IDEVICE_PHASE_UPLOADING, sent, total);
         }
-        remote.write_entire(&buffer[..n]).await.map_err(|e| upload_error("write", e))?;
-        sent += n as i64;
-        progress.report(EIDER_IDEVICE_PHASE_UPLOADING, sent, total);
     }
-    remote.close().await.map_err(|e| upload_error("close", e))?;
-    Ok(())
+    .await;
+    // Close even after a failed write, as idevice's own upload helper does.
+    let closed = remote.close().await.map_err(|e| upload_error("close", e));
+    written.and(closed)
+}
+
+/// Removes the staged IPA if it is still there; best effort, bounded.
+async fn remove_staged(session: &mut Session, remote_path: &str) {
+    let _ = tokio::time::timeout(CLEANUP_LIMIT, async {
+        if let Ok(mut afc) = AfcClient::connect_rsd(&mut session.adapter, &mut session.handshake).await {
+            let _ = afc.remove(remote_path).await;
+        }
+    })
+    .await;
+}
+
+async fn install_staged(
+    session: &mut Session,
+    remote_path: &str,
+    bundle_id: &str,
+    progress: &Progress,
+) -> Outcome<()> {
+    let mut proxy = InstallationProxyClient::connect_rsd(&mut session.adapter, &mut session.handshake)
+        .await
+        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_SERVICE, format!("installation_proxy: {e}")))?;
+    let options = plist::Value::Dictionary(
+        [("CFBundleIdentifier".to_string(), plist::Value::String(bundle_id.to_string()))]
+            .into_iter()
+            .collect(),
+    );
+    progress.report(EIDER_IDEVICE_PHASE_INSTALLING, 0, 100);
+    let report = |(percent, _): (u64, ())| async move {
+        progress.report(EIDER_IDEVICE_PHASE_INSTALLING, percent as i64, 100);
+    };
+    proxy
+        .install_with_callback(remote_path.to_string(), Some(options), report, ())
+        .await
+        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_INSTALL, e.to_string()))
 }
 
 async fn install(
@@ -237,36 +307,38 @@ async fn install(
     bundle_id: String,
     progress: &Progress,
 ) -> Outcome<()> {
+    let local_error =
+        |e: std::io::Error| Failure::new(EIDER_IDEVICE_ERR_LOCAL_FILE, format!("{}: {e}", ipa.display()));
+    let mut file = tokio::fs::File::open(&ipa).await.map_err(local_error)?;
+    let size = file.metadata().await.map_err(local_error)?.len();
+
     progress.report(EIDER_IDEVICE_PHASE_CONNECTING, 0, 0);
-    let mut session =
-        with_timeout(connect_limit, "connecting", open_session(address, &mut pairing)).await?;
+    let mut session = open_session(address, &mut pairing, connect_limit).await?;
     require_services(&session.handshake)?;
 
     // One staging name per bundle id, so a failed install leaves at most one stale file.
     let remote_path = format!("{PUBLIC_STAGING}/{bundle_id}.ipa");
-    upload(&mut session, &ipa, &remote_path, progress).await?;
-
-    let mut proxy = InstallationProxyClient::connect_rsd(&mut session.adapter, &mut session.handshake)
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_SERVICE, format!("installation_proxy: {e}")))?;
-    let options = plist::Value::Dictionary(
-        [("CFBundleIdentifier".to_string(), plist::Value::String(bundle_id.clone()))]
-            .into_iter()
-            .collect(),
-    );
-    progress.report(EIDER_IDEVICE_PHASE_INSTALLING, 0, 100);
-    let report = |(percent, _): (u64, ())| async move {
-        progress.report(EIDER_IDEVICE_PHASE_INSTALLING, percent as i64, 100);
+    let upload_limit = limit_for(UPLOAD_BASE, size, UPLOAD_FLOOR_BYTES_PER_SECOND);
+    let uploaded = with_timeout(
+        upload_limit,
+        "the upload",
+        upload(&mut session, &mut file, size as i64, &remote_path, progress),
+    )
+    .await;
+    let result = match uploaded {
+        Ok(()) => {
+            let install_limit = limit_for(INSTALL_BASE, size, INSTALL_FLOOR_BYTES_PER_SECOND);
+            with_timeout(
+                install_limit,
+                "the install",
+                install_staged(&mut session, &remote_path, &bundle_id, progress),
+            )
+            .await
+        }
+        Err(failure) => Err(failure),
     };
-    let result = proxy
-        .install_with_callback(remote_path.clone(), Some(options), report, ())
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_INSTALL, e.to_string()));
-
-    // installd normally consumes the staged file; remove it if it is still there.
-    if let Ok(mut afc) = AfcClient::connect_rsd(&mut session.adapter, &mut session.handshake).await {
-        let _ = afc.remove(&remote_path).await;
-    }
+    // installd normally consumes the staged file; a failed upload or install may leave it.
+    remove_staged(&mut session, &remote_path).await;
     result?;
     progress.report(EIDER_IDEVICE_PHASE_FINISHED, 100, 100);
     Ok(())
@@ -278,19 +350,21 @@ async fn uninstall(
     connect_limit: Duration,
     bundle_id: String,
 ) -> Outcome<()> {
-    let mut session =
-        with_timeout(connect_limit, "connecting", open_session(address, &mut pairing)).await?;
-    let mut proxy = InstallationProxyClient::connect_rsd(&mut session.adapter, &mut session.handshake)
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_SERVICE, format!("installation_proxy: {e}")))?;
-    proxy
-        .uninstall(bundle_id, None)
-        .await
-        .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_UNINSTALL, e.to_string()))
+    let mut session = open_session(address, &mut pairing, connect_limit).await?;
+    with_timeout(UNINSTALL_LIMIT, "the uninstall", async {
+        let mut proxy = InstallationProxyClient::connect_rsd(&mut session.adapter, &mut session.handshake)
+            .await
+            .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_SERVICE, format!("installation_proxy: {e}")))?;
+        proxy
+            .uninstall(bundle_id, None)
+            .await
+            .map_err(|e| Failure::new(EIDER_IDEVICE_ERR_UNINSTALL, e.to_string()))
+    })
+    .await
 }
 
 async fn check(address: SocketAddr, mut pairing: RpPairingFile, limit: Duration) -> Outcome<()> {
-    let session = with_timeout(limit, "connecting", open_session(address, &mut pairing)).await?;
+    let session = open_session(address, &mut pairing, limit).await?;
     require_services(&session.handshake)
 }
 
@@ -463,11 +537,7 @@ pub unsafe extern "C" fn eider_idevice_free_string(message: *mut c_char) {
 /// See include/eider_idevice.h.
 #[unsafe(no_mangle)]
 pub extern "C" fn eider_idevice_version() -> *const c_char {
-    concat!(
-        "eider-idevice ",
-        env!("CARGO_PKG_VERSION"),
-        " (idevice c8fff6d7fb2690eaeb591ce510754effa7b1e19b)\0"
-    )
-    .as_ptr()
-    .cast()
+    // EIDER_VERSION_STRING comes from build.rs, which reads EIDER_SOURCE_COMMIT as set by
+    // Scripts/build-idevice.sh, so a released binary names the source it was built from.
+    concat!(env!("EIDER_VERSION_STRING"), "\0").as_ptr().cast()
 }
