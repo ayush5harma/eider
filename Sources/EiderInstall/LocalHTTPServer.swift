@@ -29,7 +29,7 @@ struct HTTPResource {
 /// Serves GET and HEAD with single byte ranges; anything a route does not know is a 404. Each
 /// response ends with `Connection: close`, which keeps the parser to one request head and
 /// costs nothing over loopback.
-final class LoopbackHTTPServer: @unchecked Sendable {
+final class LocalHTTPServer: @unchecked Sendable {
     typealias Router = (HTTPRequest) -> HTTPResource?
 
     struct ServerError: Error, CustomStringConvertible {

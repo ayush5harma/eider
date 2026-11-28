@@ -229,7 +229,7 @@ public actor LocalRootAuthority {
     static func probe(_ server: ServerIdentity, session: URLSession?) async -> Bool {
         let token = randomHex(bytes: 16)
         let body = Data("eider-ok".utf8)
-        let http = LoopbackHTTPServer(identity: server.identity) { request in
+        let http = LocalHTTPServer(identity: server.identity) { request in
             request.path == "/\(token)/probe" ? .data(body, contentType: "text/plain") : nil
         }
         guard let port = try? await http.start() else { return false }

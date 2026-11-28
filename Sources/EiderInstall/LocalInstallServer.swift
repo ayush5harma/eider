@@ -30,7 +30,7 @@ public final class LocalInstallServer: @unchecked Sendable {
     private let identity: SecIdentity
     private let ipaSize: Int64
     private let lock = NSLock()
-    private var server: LoopbackHTTPServer?
+    private var server: LocalHTTPServer?
     private var manifest: Data?
     private var served = ServedRanges()
     private var fullyServed = false
@@ -73,7 +73,7 @@ public final class LocalInstallServer: @unchecked Sendable {
     /// Starts listening and returns the manifest URL.
     @discardableResult
     public func start() async throws -> URL {
-        let server = LoopbackHTTPServer(identity: identity) { [weak self] request in self?.route(request) }
+        let server = LocalHTTPServer(identity: identity) { [weak self] request in self?.route(request) }
         server.onBodySent = { [weak self] path, range in self?.bodySent(path: path, range: range) }
         server.onResponse = { [weak self] request, status in self?.responded(request, status: status) }
         server.onFailure = { [weak self] error in self?.continuation.yield(.failed("\(error)")) }
@@ -85,9 +85,9 @@ public final class LocalInstallServer: @unchecked Sendable {
         }
         if alreadyStopped {
             server.stop()
-            throw LoopbackHTTPServer.ServerError(description: "The server was stopped while starting.")
+            throw LocalHTTPServer.ServerError(description: "The server was stopped while starting.")
         }
-        guard let manifestURL, let ipaURL else { throw LoopbackHTTPServer.ServerError(description: "No URL.") }
+        guard let manifestURL, let ipaURL else { throw LocalHTTPServer.ServerError(description: "No URL.") }
         let manifest = try InstallManifest.plist(ipa: ipaURL, bundleID: bundleID, version: version, title: title)
         lock.withLock { self.manifest = manifest }
 
@@ -96,7 +96,7 @@ public final class LocalInstallServer: @unchecked Sendable {
     }
 
     public func stop() {
-        let (first, server): (Bool, LoopbackHTTPServer?) = lock.withLock {
+        let (first, server): (Bool, LocalHTTPServer?) = lock.withLock {
             defer { stopped = true; self.server = nil }
             return (!stopped, self.server)
         }
@@ -179,7 +179,7 @@ public final class LocalProfileServer: @unchecked Sendable {
     private let mobileconfig: Data
     private let timeout: TimeInterval
     private let lock = NSLock()
-    private var server: LoopbackHTTPServer?
+    private var server: LocalHTTPServer?
     private var stopped = false
 
     public init(mobileconfig: Data, timeout: TimeInterval = 5 * 60) {
@@ -194,7 +194,7 @@ public final class LocalProfileServer: @unchecked Sendable {
     @discardableResult
     public func start() async throws -> URL {
         let profile = mobileconfig
-        let server = LoopbackHTTPServer(identity: nil) { request in
+        let server = LocalHTTPServer(identity: nil) { request in
             request.path == Self.path ? .data(profile, contentType: "application/x-apple-aspen-config") : nil
         }
         server.onResponse = { [weak self] request, status in
@@ -207,14 +207,14 @@ public final class LocalProfileServer: @unchecked Sendable {
         }
         if alreadyStopped {
             server.stop()
-            throw LoopbackHTTPServer.ServerError(description: "The server was stopped while starting.")
+            throw LocalHTTPServer.ServerError(description: "The server was stopped while starting.")
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in self?.stop() }
         return URL(string: "http://127.0.0.1:\(port)\(Self.path)")!
     }
 
     public func stop() {
-        let (first, server): (Bool, LoopbackHTTPServer?) = lock.withLock {
+        let (first, server): (Bool, LocalHTTPServer?) = lock.withLock {
             defer { stopped = true; self.server = nil }
             return (!stopped, self.server)
         }
