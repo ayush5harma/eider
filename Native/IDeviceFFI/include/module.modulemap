@@ -1,0 +1,5 @@
+module IDeviceFFI {
+    header "eider_idevice.h"
+    link "iconv"
+    export *
+}
