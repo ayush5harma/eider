@@ -3,13 +3,14 @@ import PackageDescription
 
 let package = Package(
     name: "Eider",
-    // iOS is for the on-device app (docs/IOS.md); only EiderCore, EiderSign and
-    // EiderInstall are built for it. EiderKit, the CLI and the Mac app stay macOS-only.
+    // iOS is for the on-device app (docs/IOS.md); only EiderCore, EiderSign,
+    // EiderInstall and EiderPairing are built for it. EiderKit, the CLI and the Mac app stay macOS-only.
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "EiderCore", targets: ["EiderCore"]),
         .library(name: "EiderSign", targets: ["EiderSign"]),
         .library(name: "EiderInstall", targets: ["EiderInstall"]),
+        .library(name: "EiderPairing", targets: ["EiderPairing"]),
         .library(name: "EiderKit", targets: ["EiderKit"]),
         .executable(name: "eider", targets: ["eider"]),
         .executable(name: "EiderApp", targets: ["EiderApp"]),
@@ -51,6 +52,17 @@ let package = Package(
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ]
         ),
+        // Native/IDeviceFFI (a C API over idevice, jkcoxson/idevice, MIT) as static
+        // libraries for iOS, the iOS simulator and the Mac; built by Scripts/build-idevice.sh
+        // and published as a release asset (2.7 MB) rather than committed.
+        .binaryTarget(
+            name: "IDeviceFFI",
+            url: "https://github.com/ayush5harma/eider/releases/download/idevice-c8fff6d-2/IDeviceFFI.xcframework.zip",
+            checksum: "a702c4430b5a8b551bc3e223a4fafb67c71b689675cba76a059875effe52b883"
+        ),
+        // Pairing mode: install through the iPhone's own installation service over
+        // RemotePairing (LocalDevVPN), with no manifest server. docs/IOS.md, "Pairing mode".
+        .target(name: "EiderPairing", dependencies: ["IDeviceFFI"]),
         .target(name: "EiderKit", dependencies: ["EiderCore"]),
         .executableTarget(
             name: "eider",
@@ -64,5 +76,6 @@ let package = Package(
         .testTarget(name: "EiderCLITests", dependencies: ["eider", "EiderKit"]),
         .testTarget(name: "EiderSignTests", dependencies: ["EiderSign"]),
         .testTarget(name: "EiderInstallTests", dependencies: ["EiderInstall"]),
+        .testTarget(name: "EiderPairingTests", dependencies: ["EiderPairing"]),
     ]
 )

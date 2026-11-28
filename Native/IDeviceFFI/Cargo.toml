@@ -1,0 +1,45 @@
+[package]
+name = "eider-idevice"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Eider's pairing-mode installer: a small C API over idevice (jkcoxson/idevice, MIT)"
+
+[lib]
+# Static only: linked into the iOS app and the Mac tests through IDeviceFFI.xcframework.
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# Pinned to the 2026-11-22 commit "fix(ffi): use new adapter stream ownership API", which
+# follows "fix(rsd): use the same UUID across tunnels" (2026-11-16): iOS 27.2+ tears down a
+# tunnel's services when its connections present different UUIDs. Scripts/build-idevice.sh
+# checks this rev against IDEVICE_COMMIT.
+# Only the features the pairing installer uses: the RemotePairing client and its TLS-PSK
+# tunnel (remote_pairing), the user-space TCP stack inside the tunnel (tunnel_tcp_stack),
+# service discovery (rsd), file upload (afc) and installation_proxy. idevice does not
+# compile without a TLS backend (its lockdown pairing file is gated on one); ring is the
+# smallest of its three and none of these paths starts a lockdown TLS session.
+idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c8fff6d7fb2690eaeb591ce510754effa7b1e19b", default-features = false, features = [
+  "remote_pairing",
+  "tunnel_tcp_stack",
+  "rsd",
+  "afc",
+  "installation_proxy",
+  "ring",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util", "fs"] }
+plist = "1.8"
+# Compiles every tracing call out. idevice's RpPairingFile::from_bytes debug-logs the whole
+# pairing dictionary, private key included; with no subscriber that prints nothing today,
+# and this keeps it so if one is ever added (features unify across the dependency graph).
+tracing = { version = "0.1", features = ["max_level_off", "release_max_level_off"] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = false
+# Panics are caught at the C boundary (catch_unwind), so unwinding stays on.
+panic = "unwind"

@@ -24,3 +24,6 @@ DerivedData/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Cargo output if Native/IDeviceFFI is built without CARGO_TARGET_DIR
+Native/IDeviceFFI/target/
