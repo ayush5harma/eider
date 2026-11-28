@@ -32,6 +32,7 @@ All in this repository's Package.swift. iOS 17 is the minimum. Liquid Glass is u
 | `EiderCore` | macOS, iOS | Platform-neutral code moved out of EiderKit: Catalog, Downloads, update matching, version compare, paths, image cache, BrowseIndex/BrowseFilter, SourceListIO. EiderKit depends on it and re-exports it, so the Mac code keeps compiling unchanged. |
 | `EiderSign` | macOS, iOS | Signing: the vendored zsign C++ sources (MIT, zhlynn/zsign) built as a C++ target against OpenSSL (krzyzanowskim/OpenSSL, binary xcframework), behind a small Swift API. Also certificate import and inspection (p12, mobileprovision, OCSP). |
 | `EiderInstall` | macOS, iOS | Unpack and repack IPAs (ZIPFoundation, MIT), the device's own HTTPS server for the IPA, the manifest server URL, and the itms-services hand-off. |
+| `EiderPairing` | macOS, iOS | Pairing mode: install through the iPhone's own installation service over RemotePairing and LocalDevVPN, on `IDeviceFFI` (idevice, MIT, a binary release asset). See "Pairing mode". |
 | `Apps/EiderMobile` | iOS | The SwiftUI app: an Xcode project that depends on the three libraries above. |
 
 EiderKit, the `eider` CLI and the Mac app stay macOS-only.
@@ -109,10 +110,52 @@ It opens Settings through the Settings URL scheme (Eider is sideloaded; `openSet
 
 So the trust step tries `prefs:root=General&path=About/CERT_TRUST_SETTINGS`, then `settings-navigation://com.apple.Settings.General/About/CERT_TRUST_SETTINGS`, then `App-prefs:`; the profile step tries `App-prefs:`, then `prefs:root=General&path=ManagedConfigurationList` (not measured). The written path stays beside each button in case a later iOS moves a page.
 
+## Pairing mode
+
+A second, fully local way to install, asked for on 2026-11-28 ("like Feather's idevice mode"): no manifest server, no certificate profile. Eider talks to the iPhone's own installation service, the one Xcode and Finder use, through a loopback VPN on the phone.
+
+### How it works
+
+1. **LocalDevVPN** (App Store id 6755608044) runs a VPN on the iPhone that routes `10.7.0.1` back to the phone itself, so an app on the phone can open a TCP connection to the phone's own RemotePairing service at `10.7.0.1:49152`. That is the service a Mac uses over Wi-Fi on iOS 17.4 and later.
+2. **Pair-verify** with an RP pairing file proves Eider holds a key the phone already trusts. Eider never runs pair-setup: idevice's own `tunnel_create_rppairing` falls back to pair-setup when verification fails, and pair-setup shows a Trust dialog on the phone, so Eider's library does pair-verify only and reports a rejected file as an error.
+3. **Tunnel and RSD.** The phone opens a TLS-PSK tunnel keyed by the pairing; idevice's user-space TCP stack runs inside it, and the RSD handshake lists the services (85 on iOS 27.3).
+4. **Install.** AFC (`com.apple.afc.shim.remote`) uploads the signed IPA to `PublicStaging/<bundle id>.ipa`, then installation_proxy (`com.apple.mobile.installation_proxy.shim.remote`) installs it with `CFBundleIdentifier` in its options, reporting percent complete. The staged file is removed afterwards if installd left it.
+
+The parts live in two places:
+
+- `Native/IDeviceFFI`: a small Rust static library over idevice (jkcoxson/idevice, MIT), pinned at `c8fff6d` (2026-11-22, which follows the 2026-11-16 fix for iOS 27.2+ requiring one RSD UUID per tunnel), with only the features it uses: `remote_pairing`, `tunnel_tcp_stack`, `rsd`, `afc`, `installation_proxy` and `ring`. Its C API (`include/eider_idevice.h`) is `eider_idevice_check`, `eider_idevice_install` and `eider_idevice_uninstall`. Each call opens its own tunnel and runs on a thread with a 16 MB stack: on a GCD worker thread (512 KB) the first check overflowed the stack guard. `Scripts/build-idevice.sh` builds it for iOS, the iOS simulator and the Mac and makes `IDeviceFFI.xcframework`; the zip is the `idevice-c8fff6d` pre-release asset, with idevice's LICENSE beside it and inside it, and Package.swift names it by URL and checksum. Stripped static libraries, 2026-11-28: ios-arm64 2,109,896 bytes, ios-arm64-simulator 2,097,160, macos-arm64 2,108,320; the zip is 2,747,401 bytes.
+- `EiderPairing` (Swift, macOS and iOS): `RemotePairingFile`, `PairingInstaller` (an actor with `check()`, `install(ipa:bundleID:progress:)` and `uninstall(bundleID:)`, host `10.7.0.1` and port 49152 by default), `PairingReachability`, `PairingInstallProgress` and `PairingInstallError`, whose messages are written for the user.
+
+### What the user needs
+
+- **An RP pairing file** for this iPhone, made on a computer the iPhone has paired with, and imported into Eider. The format is idevice's: a property list with `public_key` and `private_key` (32-byte Ed25519 keys), `identifier`, and optionally `alt_irk`. Eider checks the keys belong together.
+  - A **lockdown** pairing file (idevicepair, Jitterbug, a Mac's lockdown records: `HostID`, certificates) is refused by name; Feather #733/#739 and StikDebug #446/#471 trace their pairing errors to exactly that mix-up.
+  - A **pymobiledevice3** record (`~/.pymobiledevice3/remote_<udid>.plist`) has the keys but no identifier: pymobiledevice3 derives it from the pairing computer's hostname (uppercase UUIDv3 in the DNS namespace). The phone cannot know that hostname, so Eider refuses the record and says how to convert it: `Scripts/rppairing-from-pymobiledevice3.sh <record> <out> [hostname]` on that computer.
+- **LocalDevVPN** from the App Store (id 6755608044), switched on while installing. With it off, `check()` reports "unreachable" and the install error says to turn it on.
+- The app must be signed for the device (as for the manifest-server mode); pairing mode only replaces the delivery.
+
+Pairing material grants full access to the device: the app keeps the file in its own container (or the Keychain), never logs it, and the library's messages never contain key bytes. On the Mac the test copy lives in `~/.cache/eider-dev/pairing/` (700, files 600), never in the repository.
+
+### Measured
+
+On 2026-11-28, from the Mac over Wi-Fi to the iPhone 17 Pro "Sapphire" (iOS 27.3) at `192.168.1.50:49152`, with an RP pairing file converted from the pymobiledevice3 record made on 2026-11-22 (so the conversion is proved), `PairingDeviceTests` through the published xcframework:
+
+```
+check: ready in 0.32 s
+check with an unknown pairing file: refused("the iPhone did not accept this pairing file (pair-verify failed)")
+install: 1.26 s, 16 progress events, first connecting, last upload uploading(sent: 21806, total: 21806)
+devicectl after install: installed=true
+uninstall: 0.70 s
+devicectl after uninstall: installed=false
+```
+
+Not yet run: the same flow from the app on the iPhone through LocalDevVPN (10.7.0.1), and a large IPA (upload speed through the VPN is unmeasured).
+
 ## Testing
 
 - **Mac:** `swift build`, then `swift test --filter EiderSign` and `swift test --filter EiderInstall`. Run zsign's output through `codesign -dvvv` and `codesign --verify` as a structural check.
-- **iOS libraries:** `xcodebuild -scheme EiderInstall -destination 'generic/platform=iOS' build`. The same works for EiderCore and EiderSign.
+- **iOS libraries:** `xcodebuild -scheme EiderInstall -destination 'generic/platform=iOS' build`. The same works for EiderCore, EiderSign and EiderPairing.
+- **Pairing mode:** `swift test --filter EiderPairing` runs the pairing-file and offline installer tests. `EIDER_PAIRING_FILE=<rp file> EIDER_PAIRING_HOST=<phone Wi-Fi IP> EIDER_PAIRING_UDID=<udid> swift test --filter PairingDeviceTests` also installs and uninstalls `/tmp/eider-probe/probe.ipa` (`EIDER_PAIRING_IPA`, `EIDER_PAIRING_BUNDLE_ID` to change it) and cross-checks with `xcrun devicectl device info apps`. A new idevice pin means `Scripts/build-idevice.sh`, a new `idevice-<short commit>` pre-release and the url and checksum in Package.swift.
 - **Device:** the owner's iPhone 17 Pro "Sapphire", iOS 27.3, Developer Mode on, UDID `00008150-0004143802B8401C`.
   - Signing on the Mac uses the owner's development certificate and a wildcard development profile from team `8RA8L783G3` that includes this device.
   - Never commit a certificate, profile, p12 or password. Keep test copies outside the repository.
@@ -120,5 +163,5 @@ So the trust step tries `prefs:root=General&path=About/CERT_TRUST_SETTINGS`, the
 
 ## Rules
 
-- **Licences:** no code from Feather, PlayCover or PlayTools (GPL/AGPL); Feather may be read for approach only. zsign (MIT) is vendored with its LICENSE and a note of the upstream commit.
+- **Licences:** no code from Feather, PlayCover or PlayTools (GPL/AGPL); Feather may be read for approach only. zsign (MIT) is vendored with its LICENSE and a note of the upstream commit. idevice (MIT) ships only as the IDeviceFFI binary, with its LICENSE in the xcframework and beside the release asset; no Feather or StikDebug code is used for pairing mode.
 - **Style:** no emojis in code, comments or docs. Comments say why and what was measured.
