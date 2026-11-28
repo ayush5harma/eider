@@ -16,7 +16,12 @@ struct AddCertificateView: View {
         case p12, profile
     }
 
-    @State private var picking: Picking?
+    // Two pieces of state on purpose: the importer's isPresented binding is set
+    // to false before its completion runs, so a single optional "what is being
+    // picked" was already nil when the file arrived and the pick was dropped
+    // (seen on the owner's iPhone, iOS 27.3).
+    @State private var importing = false
+    @State private var picking: Picking = .p12
     @State private var p12: (name: String, data: Data)?
     @State private var provision: (name: String, data: Data)?
     @State private var profile: ProvisioningProfile?
@@ -29,8 +34,8 @@ struct AddCertificateView: View {
         NavigationStack {
             Form {
                 Section {
-                    fileButton("Certificate", detail: p12?.name ?? "Choose...", systemImage: "key") { picking = .p12 }
-                    fileButton("Provisioning Profile", detail: provision?.name ?? "Choose...", systemImage: "doc.badge.gearshape") { picking = .profile }
+                    fileButton("Certificate", detail: p12?.name ?? "Choose...", systemImage: "key") { pick(.p12) }
+                    fileButton("Provisioning Profile", detail: provision?.name ?? "Choose...", systemImage: "doc.badge.gearshape") { pick(.profile) }
                 } header: {
                     Text("Files")
                 }
@@ -72,13 +77,11 @@ struct AddCertificateView: View {
             }
             // One importer for both files: SwiftUI keeps only one per view.
             .fileImporter(
-                isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }),
+                isPresented: $importing,
                 allowedContentTypes: picking == .profile ? [.mobileProvision] : [.pkcs12]
             ) { outcome in
-                let target = picking
-                picking = nil
                 switch outcome {
-                case .success(let url): load(url, as: target)
+                case .success(let url): load(url, as: picking)
                 case .failure(let failure): error = failure.localizedDescription
                 }
             }
@@ -96,20 +99,23 @@ struct AddCertificateView: View {
         }
     }
 
-    private func load(_ url: URL, as target: Picking?) {
+    private func pick(_ target: Picking) {
+        picking = target
+        importing = true
+    }
+
+    private func load(_ url: URL, as target: Picking) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         error = nil
         do {
             let data = try Data(contentsOf: url)
             switch target {
-            case .p12?:
+            case .p12:
                 p12 = (url.lastPathComponent, data)
-            case .profile?:
+            case .profile:
                 profile = try ProvisioningProfile.parse(data)
                 provision = (url.lastPathComponent, data)
-            case nil:
-                break
             }
         } catch {
             self.error = error.localizedDescription
