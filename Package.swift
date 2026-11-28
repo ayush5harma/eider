@@ -57,8 +57,8 @@ let package = Package(
         // and published as a release asset (2.7 MB) rather than committed.
         .binaryTarget(
             name: "IDeviceFFI",
-            url: "https://github.com/ayush5harma/eider/releases/download/idevice-c8fff6d/IDeviceFFI.xcframework.zip",
-            checksum: "fe12e0d5438d571c0776d9599b96a6807604b894a66aadc2c6aac1776edbc74a"
+            url: "https://github.com/ayush5harma/eider/releases/download/idevice-c8fff6d-2/IDeviceFFI.xcframework.zip",
+            checksum: "a702c4430b5a8b551bc3e223a4fafb67c71b689675cba76a059875effe52b883"
         ),
         // Pairing mode: install through the iPhone's own installation service over
         // RemotePairing (LocalDevVPN), with no manifest server. docs/IOS.md, "Pairing mode".

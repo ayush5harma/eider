@@ -8,7 +8,8 @@ public enum PairingReachability: Sendable, Equatable {
     /// No connection: LocalDevVPN is off, or the address is wrong. The text says what failed.
     case unreachable(String)
     /// The iPhone answered but refused: the pairing file is wrong or was revoked, or the
-    /// tunnel or its services did not come up.
+    /// tunnel or its services did not come up. `PairingInstaller.verify()` throws the typed
+    /// error when the UI has to tell these apart.
     case refused(String)
 }
 
@@ -29,6 +30,10 @@ public enum PairingInstallError: Error, LocalizedError, Sendable, Equatable {
     case pairingRejected(String)
     /// Paired, but the tunnel, RSD or a service did not answer.
     case serviceUnavailable(String)
+    /// The iPhone answered, then stopped answering before the step finished.
+    case timedOut(String)
+    /// A bad argument from the caller (a bundle id with a slash, a host that is not an IP).
+    case invalidArgument(String)
     case ipaUnreadable(String)
     case uploadFailed(String)
     case installFailed(String)
@@ -47,6 +52,11 @@ public enum PairingInstallError: Error, LocalizedError, Sendable, Equatable {
         case .serviceUnavailable(let detail):
             return "The iPhone's installation service did not answer. Toggle LocalDevVPN off "
                 + "and on, then try again. (\(detail))"
+        case .timedOut(let detail):
+            return "The iPhone stopped answering. Keep it awake with LocalDevVPN on, then try "
+                + "again. (\(detail))"
+        case .invalidArgument(let detail):
+            return "Eider passed the installer something it cannot use. (\(detail))"
         case .ipaUnreadable(let detail):
             return "Eider could not read the IPA. (\(detail))"
         case .uploadFailed(let detail):
@@ -71,17 +81,21 @@ public enum PairingInstallError: Error, LocalizedError, Sendable, Equatable {
 /// services and a 21 KB probe IPA installed and uninstalled.
 ///
 /// The pairing is only ever verified, never set up: a rejected pairing file is an error, not
-/// a Trust prompt on the phone. Each call opens and closes its own tunnel; calls run one at a
-/// time on a private thread and cannot be cancelled once started.
+/// a Trust prompt on the phone. Each call opens and closes its own tunnel and cannot be
+/// cancelled once started; every step has an upper bound in the library (see
+/// eider_idevice.h), so a phone that stops answering ends the call with `.timedOut`. Installs
+/// and uninstalls run one at a time; check() runs on its own queue so a status row never
+/// waits behind an install.
 public actor PairingInstaller {
     private let pairingFile: RemotePairingFile
     private let host: String
     private let port: UInt16
-    private let queue = DispatchQueue(label: "io.github.ayush5harma.EiderPairing")
+    private let operationQueue = DispatchQueue(label: "io.github.ayush5harma.EiderPairing.operation")
+    private let checkQueue = DispatchQueue(label: "io.github.ayush5harma.EiderPairing.check")
 
-    /// check() is meant for a status row; a working tunnel takes well under a second.
+    /// check() is meant for a status row; the tunnel was up in 0.32 to 0.44 s on 2026-11-28.
     static let checkTimeoutMilliseconds: UInt32 = 5_000
-    /// Bounds connecting, pairing, tunnel and RSD; the upload and install are not bounded.
+    /// Bounds the TCP connect, and separately pairing, tunnel and RSD, for install and uninstall.
     static let connectTimeoutMilliseconds: UInt32 = 15_000
 
     public init(pairingFile: RemotePairingFile, host: String = "10.7.0.1", port: UInt16 = 49152) {
@@ -92,22 +106,31 @@ public actor PairingInstaller {
 
     /// Connects, verifies the pairing, opens the tunnel and does the RSD handshake.
     public func check() async -> PairingReachability {
+        switch await verifyResult() {
+        case .success:
+            return .ready
+        case .failure(.unreachable(let detail)), .failure(.timedOut(let detail)):
+            return .unreachable(detail)
+        case .failure(let error):
+            return .refused(error.detail)
+        }
+    }
+
+    /// The same as check(), but throws the typed error, for a UI that must tell a rejected
+    /// pairing file (re-import it) from a tunnel that did not come up (retry, toggle the VPN).
+    public func verify() async throws {
+        try await verifyResult().get()
+    }
+
+    private func verifyResult() async -> Result<Void, PairingInstallError> {
         let (host, port, pairing) = (host, port, pairingFile.data)
-        let result = await run {
+        return await run(on: checkQueue) {
             Self.call { message in
                 pairing.withUnsafeBytes { bytes in
                     eider_idevice_check(host, port, bytes.bindMemory(to: UInt8.self).baseAddress,
                                         bytes.count, Self.checkTimeoutMilliseconds, message)
                 }
             }
-        }
-        switch result {
-        case .success:
-            return .ready
-        case .failure(.unreachable(let detail)):
-            return .unreachable(detail)
-        case .failure(let error):
-            return .refused(error.detail)
         }
     }
 
@@ -124,7 +147,7 @@ public actor PairingInstaller {
         let box = Unmanaged.passRetained(ProgressBox(progress))
         defer { box.release() }
         let context = UInt(bitPattern: box.toOpaque())
-        try await run {
+        try await run(on: operationQueue) {
             Self.call { message in
                 pairing.withUnsafeBytes { bytes in
                     eider_idevice_install(host, port, bytes.bindMemory(to: UInt8.self).baseAddress,
@@ -139,7 +162,7 @@ public actor PairingInstaller {
     public func uninstall(bundleID: String) async throws {
         try Self.validate(bundleID: bundleID)
         let (host, port, pairing) = (host, port, pairingFile.data)
-        try await run {
+        try await run(on: operationQueue) {
             Self.call { message in
                 pairing.withUnsafeBytes { bytes in
                     eider_idevice_uninstall(host, port, bytes.bindMemory(to: UInt8.self).baseAddress,
@@ -152,8 +175,9 @@ public actor PairingInstaller {
 
     // MARK: - Bridge
 
-    /// Runs a blocking C call on the private queue, off Swift's cooperative threads.
+    /// Runs a blocking C call on a private queue, off Swift's cooperative threads.
     private func run(
+        on queue: DispatchQueue,
         _ body: @escaping @Sendable () -> Result<Void, PairingInstallError>
     ) async -> Result<Void, PairingInstallError> {
         await withCheckedContinuation { continuation in
@@ -176,8 +200,12 @@ public actor PairingInstaller {
         switch Int(code) {
         case Int(EIDER_IDEVICE_ERR_PAIRING_FILE):
             return .invalidPairingFile("The pairing file is not a RemotePairing pairing file: \(detail)")
-        case Int(EIDER_IDEVICE_ERR_UNREACHABLE), Int(EIDER_IDEVICE_ERR_TIMEOUT):
+        case Int(EIDER_IDEVICE_ERR_UNREACHABLE):
             return .unreachable(detail)
+        case Int(EIDER_IDEVICE_ERR_TIMEOUT):
+            return .timedOut(detail)
+        case Int(EIDER_IDEVICE_ERR_INVALID_ARGUMENT):
+            return .invalidArgument(detail)
         case Int(EIDER_IDEVICE_ERR_PAIRING_REJECTED):
             return .pairingRejected(detail)
         case Int(EIDER_IDEVICE_ERR_TUNNEL), Int(EIDER_IDEVICE_ERR_SERVICE):
@@ -199,7 +227,7 @@ public actor PairingInstaller {
     /// path separator.
     private static func validate(bundleID: String) throws {
         guard !bundleID.isEmpty, !bundleID.contains("/"), !bundleID.contains("\0") else {
-            throw PairingInstallError.installFailed("\"\(bundleID)\" is not a bundle id")
+            throw PairingInstallError.invalidArgument("\"\(bundleID)\" is not a bundle id")
         }
     }
 }
@@ -209,7 +237,8 @@ extension PairingInstallError {
     var detail: String {
         switch self {
         case .invalidPairingFile(let d), .unreachable(let d), .pairingRejected(let d),
-             .serviceUnavailable(let d), .ipaUnreadable(let d), .uploadFailed(let d),
+             .serviceUnavailable(let d), .timedOut(let d), .invalidArgument(let d),
+             .ipaUnreadable(let d), .uploadFailed(let d),
              .installFailed(let d), .uninstallFailed(let d), .internalError(let d):
             return d
         }
@@ -221,7 +250,7 @@ private final class ProgressBox: @unchecked Sendable {
     init(_ handler: @escaping @Sendable (PairingInstallProgress) -> Void) { self.handler = handler }
 }
 
-/// Called by the C side on the installing thread.
+/// Called by the C side on its operation thread while eider_idevice_install blocks.
 private let progressTrampoline: @convention(c) (UnsafeMutableRawPointer?, Int32, Int64, Int64) -> Void = {
     context, phase, done, total in
     guard let context else { return }
