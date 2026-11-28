@@ -10,11 +10,14 @@ final class LocalInstallServerTests: XCTestCase {
     private var ipa: URL!
     private var ipaData: Data!
     private var session: URLSession!
+    /// This Mac's own LAN address, standing in for the iPhone's Wi-Fi address.
+    private var address: DeviceAddress!
 
     override func setUp() async throws {
+        address = try macInstallAddress()
         keychain = try TemporaryKeychain()
         authority = LocalRootAuthority(namespace: "test.eider.server", keychain: keychain.scope)
-        identity = try await authority.serverIdentity()
+        identity = try await authority.serverIdentity(for: [address])
         // Three chunks and a bit, so a full GET crosses chunk boundaries.
         ipaData = Data((0..<(3 * 512 * 1024 + 1234)).map { UInt8(truncatingIfNeeded: $0 &* 31) })
         ipa = keychain.directory.appendingPathComponent("app.ipa")
@@ -43,11 +46,14 @@ final class LocalInstallServerTests: XCTestCase {
     }
 
     func testServesManifestAndIPAWithHeadAndRanges() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, ipa: ipa, bundleID: "org.example.demo",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "org.example.demo",
                                             version: "1.2.3", title: "Demo & Co")
         let manifestURL = try await server.start()
         let ipaURL = try XCTUnwrap(server.ipaURL)
-        XCTAssertEqual(manifestURL.host, "127.0.0.1")
+        // Not 127.0.0.1: appstored refuses a loopback manifest URL as not external.
+        XCTAssertEqual(manifestURL.host, address.description)
+        XCTAssertEqual(ipaURL.host, address.description)
+        XCTAssertEqual(manifestURL.scheme, "https")
         XCTAssertEqual(manifestURL.lastPathComponent, "manifest.plist")
         XCTAssertEqual(server.token.count, 32)
 
@@ -93,7 +99,7 @@ final class LocalInstallServerTests: XCTestCase {
     }
 
     func testRangesThatTogetherCoverTheIPACountAsFullyServed() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, ipa: ipa, bundleID: "a", version: "1",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a", version: "1",
                                             title: "A")
         try await server.start()
         let ipaURL = try XCTUnwrap(server.ipaURL)
@@ -107,11 +113,11 @@ final class LocalInstallServerTests: XCTestCase {
     }
 
     func testUnknownTokenAndPathsAre404() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, ipa: ipa, bundleID: "a", version: "1",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a", version: "1",
                                             title: "A")
         let manifestURL = try await server.start()
         defer { server.stop() }
-        let base = try XCTUnwrap(URL(string: "https://127.0.0.1:\(manifestURL.port!)"))
+        let base = try XCTUnwrap(URL(string: "https://\(address!):\(manifestURL.port!)"))
         for path in ["/0123456789abcdef0123456789abcdef/manifest.plist", "/\(server.token)/other",
                      "/\(server.token)", "/", "/root.mobileconfig"] {
             let (_, response) = try await request(base.appendingPathComponent(path))
@@ -121,20 +127,36 @@ final class LocalInstallServerTests: XCTestCase {
         XCTAssertEqual(post.statusCode, 405)
     }
 
-    func testListensOnLoopbackOnly() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, ipa: ipa, bundleID: "a", version: "1",
-                                            title: "A")
+    func testListensOnTheGivenAddressOnly() async throws {
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a",
+                                            version: "1", title: "A")
         let port = try await server.start().port!
         defer { server.stop() }
-        XCTAssertEqual(tcpConnect(host: "127.0.0.1", port: port), 0)
-        guard let lan = firstNonLoopbackIPv4() else {
-            throw XCTSkip("No non-loopback IPv4 address on this Mac.")
+        XCTAssertEqual(tcpConnect(host: address.description, port: port), 0)
+        XCTAssertEqual(tcpConnect(host: "127.0.0.1", port: port), ECONNREFUSED)
+    }
+
+    /// Another machine on the Wi-Fi cannot be simulated from one Mac, so the server is told
+    /// that only loopback is this device: a connection from the Mac's LAN address then looks
+    /// like a stranger's and must get no answer at all.
+    func testConnectionsFromOtherAddressesAreRefused() async throws {
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ownAddresses: { [] },
+                                            ipa: ipa, bundleID: "a", version: "1", title: "A", timeout: 60)
+        let manifestURL = try await server.start()
+        do {
+            let (_, response) = try await request(manifestURL)
+            XCTFail("A connection from \(address!) outside the device was answered: \(response.statusCode)")
+        } catch let error as URLError {
+            XCTAssertTrue([.networkConnectionLost, .secureConnectionFailed, .cannotConnectToHost,
+                           .cannotParseResponse, .badServerResponse].contains(error.code), "\(error)")
         }
-        XCTAssertEqual(tcpConnect(host: lan, port: port), ECONNREFUSED, "reachable on \(lan)")
+        server.stop()
+        let events = await collect(server.events)
+        XCTAssertEqual(events, [.stopped])
     }
 
     func testUntrustedRootIsRejectedByDefaultTrust() async throws {
-        let server = try LocalInstallServer(identity: identity.identity, ipa: ipa, bundleID: "a", version: "1",
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa, bundleID: "a", version: "1",
                                             title: "A")
         let manifestURL = try await server.start()
         defer { server.stop() }
@@ -181,8 +203,19 @@ final class LocalInstallServerTests: XCTestCase {
         let untrusted = await authority.status()
         XCTAssertEqual(untrusted, .needsTrust)
         // Standing in for a device where the user trusted the root.
-        let trusted = await authority.status(probeWith: session)
+        let trusted = await authority.status(probeWith: session, address: address)
         XCTAssertEqual(trusted, .ready)
+        // No Wi-Fi: nothing appstored would take.
+        let offline = await authority.status(probeWith: session, address: nil)
+        XCTAssertEqual(offline, .needsWiFi)
+    }
+
+    func testProbeTellsAnUntrustedRootFromNoConnection() {
+        XCTAssertEqual(LocalRootAuthority.classify(URLError(.serverCertificateUntrusted)), .untrusted)
+        XCTAssertEqual(LocalRootAuthority.classify(URLError(.secureConnectionFailed)), .untrusted)
+        XCTAssertEqual(LocalRootAuthority.classify(URLError(.notConnectedToInternet)), .unreachable)
+        XCTAssertEqual(LocalRootAuthority.classify(URLError(.cannotConnectToHost)), .unreachable)
+        XCTAssertEqual(LocalRootAuthority.classify(URLError(.timedOut)), .unreachable)
     }
 
     func testItmsServicesURLPercentEncodesTheManifestURL() {
@@ -208,21 +241,4 @@ func tcpConnect(host: String, port: Int) -> Int32 {
         }
     }
     return result == 0 ? 0 : errno
-}
-
-func firstNonLoopbackIPv4() -> String? {
-    var list: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&list) == 0, let first = list else { return nil }
-    defer { freeifaddrs(list) }
-    for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
-        let entry = pointer.pointee
-        guard let address = entry.ifa_addr, address.pointee.sa_family == UInt8(AF_INET),
-              entry.ifa_flags & UInt32(IFF_LOOPBACK) == 0, entry.ifa_flags & UInt32(IFF_UP) != 0 else { continue }
-        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        if getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0,
-                       NI_NUMERICHOST) == 0 {
-            return String(cString: host)
-        }
-    }
-    return nil
 }
