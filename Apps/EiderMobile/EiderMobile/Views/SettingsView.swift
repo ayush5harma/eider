@@ -50,10 +50,10 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .task { await model.checkInstallReadiness() }
-            // Back from Settings, where trust is turned on: ask again.
+            .task { await model.checkInstallSetup() }
+            // Back from Settings, where trust is turned on, or from the VPN app: ask again.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await model.checkInstallReadiness() } }
+                if phase == .active { Task { await model.checkInstallSetup() } }
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

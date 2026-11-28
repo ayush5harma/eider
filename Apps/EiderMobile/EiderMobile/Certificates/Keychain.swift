@@ -89,3 +89,46 @@ enum ManifestServerKeychain {
         SecItemDelete(query as CFDictionary)
     }
 }
+
+/// The pairing file, one generic-password item. It grants full access to this iPhone, so it is
+/// never a file in Documents: the Keychain, this device only and after first unlock.
+enum PairingKeychain {
+    private static let service = "io.github.ayush5harma.EideriOS.pairing-file"
+    private static let account = "pairing"
+
+    static func set(_ data: Data) throws {
+        delete()
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: data,
+        ]
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else { throw CertificateError.keychain(status) }
+    }
+
+    /// nil when none is stored.
+    static func load() -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
+    }
+
+    static func delete() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
