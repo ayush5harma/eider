@@ -6,7 +6,7 @@ import UIKit
 /// What an install has reached. The stream ends after `.handedToIOS`: from then on the
 /// install is iOS's (its progress shows on the home screen icon), not Eider's.
 public enum InstallProgress: Sendable, Equatable {
-    /// The loopback server is up and serves this manifest.
+    /// The install server is up and serves this manifest.
     case serving(manifest: URL)
     /// The itms-services link was handed to the system; iOS now asks the user to confirm.
     case opened(URL)
@@ -59,7 +59,7 @@ private final class BackgroundTask {
 #endif
 
 /// Installs a signed IPA on the device the app runs on, through an itms-services link served
-/// from the app's own loopback HTTPS server. See docs/IOS.md, "Installing on the device itself".
+/// from the app's own HTTPS server at its LAN address. See docs/IOS.md, "Installing on the device itself".
 public final class LocalInstaller: @unchecked Sendable {
     public enum Error: Swift.Error, Equatable, CustomStringConvertible {
         /// The system would not open the link.
@@ -67,9 +67,12 @@ public final class LocalInstaller: @unchecked Sendable {
         /// The server stopped (timeout) before iOS had fetched the whole IPA.
         case timedOut
         case server(String)
+        /// No Wi-Fi or other private-network address to serve from; appstored refuses loopback.
+        case needsWiFi
 
         public var description: String {
             switch self {
+            case .needsWiFi: return LocalNetwork.noAddressMessage
             case .couldNotOpen(let url): return "The system did not open \(url.absoluteString)."
             case .timedOut: return "iOS did not fetch the app before the install server timed out."
             case .server(let message): return "The install server failed: \(message)"
@@ -85,6 +88,7 @@ public final class LocalInstaller: @unchecked Sendable {
     private let background: BackgroundActivity
     private let timeout: TimeInterval
     private let grace: TimeInterval
+    private let installAddress: @Sendable () -> DeviceAddress?
 
     /// - Parameters:
     ///   - opener: defaults to `UIApplication.shared.open` on iOS; elsewhere to one that fails.
@@ -92,9 +96,12 @@ public final class LocalInstaller: @unchecked Sendable {
     ///   - timeout: how long a server waits for iOS before it stops.
     ///   - grace: how long the server stays up after the IPA was fully served, in case iOS
     ///     comes back for another range.
+    ///   - installAddress: the address to serve from, read at each install.
     public init(authority: LocalRootAuthority, opener: Opener? = nil, background: BackgroundActivity? = nil,
-                timeout: TimeInterval = 15 * 60, grace: TimeInterval = 10) {
+                timeout: TimeInterval = 15 * 60, grace: TimeInterval = 10,
+                installAddress: @escaping @Sendable () -> DeviceAddress? = { LocalNetwork.installAddress() }) {
         self.authority = authority
+        self.installAddress = installAddress
         #if canImport(UIKit)
         self.opener = opener ?? { await LocalInstaller.openWithSystem($0) }
         self.background = background ?? .system
@@ -114,13 +121,17 @@ public final class LocalInstaller: @unchecked Sendable {
     #endif
 
     /// Serves `ipa` and its manifest, opens the itms-services link, and reports progress until
-    /// iOS has the whole IPA. Throws if the server cannot start or the link cannot be opened.
-    /// Cancelling the stream's consumer stops the server.
+    /// iOS has the whole IPA. Throws `.needsWiFi` without a private-network address, or if the
+    /// server cannot start or the link cannot be opened. Cancelling the stream's consumer stops
+    /// the server.
     public func install(ipa: URL, bundleID: String, version: String, title: String)
         async throws -> AsyncThrowingStream<InstallProgress, Swift.Error> {
-        let identity = try await authority.serverIdentity()
-        let server = try LocalInstallServer(identity: identity.identity, ipa: ipa, bundleID: bundleID,
-                                            version: version, title: title, timeout: timeout)
+        // appstored refuses a loopback manifest URL ("The manifest URL isn't external", iOS
+        // 27.3, 2026-11-28), so the server must be at the device's LAN address.
+        guard let address = installAddress() else { throw Error.needsWiFi }
+        let identity = try await authority.serverIdentity(for: [address])
+        let server = try LocalInstallServer(identity: identity.identity, address: address, ipa: ipa,
+                                            bundleID: bundleID, version: version, title: title, timeout: timeout)
         let manifest = try await server.start()
         guard let link = LocalInstallServer.itmsServicesURL(manifest: manifest) else {
             server.stop()

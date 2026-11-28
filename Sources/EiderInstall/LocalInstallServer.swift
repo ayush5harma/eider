@@ -1,11 +1,14 @@
 import Foundation
 import Security
 
-/// Serves one IPA and its itms-services manifest over HTTPS on 127.0.0.1.
+/// Serves one IPA and its itms-services manifest over HTTPS at one of this device's own LAN
+/// addresses, answering only connections from the device itself.
 ///
-/// Paths carry a random 128-bit token, `/<token>/manifest.plist` and `/<token>/app.ipa`, so
-/// another app on the device that finds the port still cannot fetch the IPA. Everything else
-/// is a 404. The server stops itself after `timeout`.
+/// Not 127.0.0.1: appstored refuses a loopback manifest URL before connecting ("The manifest
+/// URL isn't external", iOS 27.3, measured 2026-11-28; see `LocalNetwork`). Paths carry a
+/// random 128-bit token, `/<token>/manifest.plist` and `/<token>/app.ipa`, so another app on
+/// the device that finds the port still cannot fetch the IPA. Everything else is a 404. The
+/// server stops itself after `timeout`.
 public final class LocalInstallServer: @unchecked Sendable {
     public enum Event: Sendable, Equatable {
         case manifestFetched
@@ -24,22 +27,39 @@ public final class LocalInstallServer: @unchecked Sendable {
     public let bundleID: String
     public let version: String
     public let title: String
+    /// The address the URLs name and the listener binds.
+    public let address: DeviceAddress
 
     private let continuation: AsyncStream<Event>.Continuation
     private let timeout: TimeInterval
     private let identity: SecIdentity
+    private let ownAddresses: @Sendable () -> [LocalNetwork.InterfaceAddress]
     private let ipaSize: Int64
     private let lock = NSLock()
-    private var server: LoopbackHTTPServer?
+    private var server: LocalHTTPServer?
     private var manifest: Data?
     private var served = ServedRanges()
     private var fullyServed = false
     private var stopped = false
     private var port: UInt16?
 
-    public init(identity: SecIdentity, ipa: URL, bundleID: String, version: String, title: String,
-                timeout: TimeInterval = 15 * 60) throws {
+    /// - Parameters:
+    ///   - identity: a leaf whose subjectAltName holds `address`
+    ///     (`LocalRootAuthority.serverIdentity(for:)`).
+    ///   - address: this device's LAN address (`LocalNetwork.installAddress()`).
+    public convenience init(identity: SecIdentity, address: DeviceAddress, ipa: URL, bundleID: String,
+                            version: String, title: String, timeout: TimeInterval = 15 * 60) throws {
+        try self.init(identity: identity, address: address, ownAddresses: { LocalNetwork.interfaceAddresses() },
+                      ipa: ipa, bundleID: bundleID, version: version, title: title, timeout: timeout)
+    }
+
+    /// `ownAddresses` decides which remote addresses count as this device; tests narrow it.
+    init(identity: SecIdentity, address: DeviceAddress,
+         ownAddresses: @escaping @Sendable () -> [LocalNetwork.InterfaceAddress], ipa: URL, bundleID: String,
+         version: String, title: String, timeout: TimeInterval) throws {
         self.identity = identity
+        self.address = address
+        self.ownAddresses = ownAddresses
         self.ipa = ipa
         self.bundleID = bundleID
         self.version = version
@@ -73,7 +93,9 @@ public final class LocalInstallServer: @unchecked Sendable {
     /// Starts listening and returns the manifest URL.
     @discardableResult
     public func start() async throws -> URL {
-        let server = LoopbackHTTPServer(identity: identity) { [weak self] request in self?.route(request) }
+        let server = LocalHTTPServer(identity: identity, binding: .address(address), ownAddresses: ownAddresses) {
+            [weak self] request in self?.route(request)
+        }
         server.onBodySent = { [weak self] path, range in self?.bodySent(path: path, range: range) }
         server.onResponse = { [weak self] request, status in self?.responded(request, status: status) }
         server.onFailure = { [weak self] error in self?.continuation.yield(.failed("\(error)")) }
@@ -85,9 +107,9 @@ public final class LocalInstallServer: @unchecked Sendable {
         }
         if alreadyStopped {
             server.stop()
-            throw LoopbackHTTPServer.ServerError(description: "The server was stopped while starting.")
+            throw LocalHTTPServer.ServerError(description: "The server was stopped while starting.")
         }
-        guard let manifestURL, let ipaURL else { throw LoopbackHTTPServer.ServerError(description: "No URL.") }
+        guard let manifestURL, let ipaURL else { throw LocalHTTPServer.ServerError(description: "No URL.") }
         let manifest = try InstallManifest.plist(ipa: ipaURL, bundleID: bundleID, version: version, title: title)
         lock.withLock { self.manifest = manifest }
 
@@ -96,7 +118,7 @@ public final class LocalInstallServer: @unchecked Sendable {
     }
 
     public func stop() {
-        let (first, server): (Bool, LoopbackHTTPServer?) = lock.withLock {
+        let (first, server): (Bool, LocalHTTPServer?) = lock.withLock {
             defer { stopped = true; self.server = nil }
             return (!stopped, self.server)
         }
@@ -108,7 +130,7 @@ public final class LocalInstallServer: @unchecked Sendable {
 
     private func url(for name: String) -> URL? {
         guard let port = lock.withLock({ port }) else { return nil }
-        return URL(string: "https://127.0.0.1:\(port)/\(token)/\(name)")
+        return URL(string: "https://\(address):\(port)/\(token)/\(name)")
     }
 
     private func route(_ request: HTTPRequest) -> HTTPResource? {
@@ -179,7 +201,7 @@ public final class LocalProfileServer: @unchecked Sendable {
     private let mobileconfig: Data
     private let timeout: TimeInterval
     private let lock = NSLock()
-    private var server: LoopbackHTTPServer?
+    private var server: LocalHTTPServer?
     private var stopped = false
 
     public init(mobileconfig: Data, timeout: TimeInterval = 5 * 60) {
@@ -194,7 +216,7 @@ public final class LocalProfileServer: @unchecked Sendable {
     @discardableResult
     public func start() async throws -> URL {
         let profile = mobileconfig
-        let server = LoopbackHTTPServer(identity: nil) { request in
+        let server = LocalHTTPServer(identity: nil) { request in
             request.path == Self.path ? .data(profile, contentType: "application/x-apple-aspen-config") : nil
         }
         server.onResponse = { [weak self] request, status in
@@ -207,14 +229,14 @@ public final class LocalProfileServer: @unchecked Sendable {
         }
         if alreadyStopped {
             server.stop()
-            throw LoopbackHTTPServer.ServerError(description: "The server was stopped while starting.")
+            throw LocalHTTPServer.ServerError(description: "The server was stopped while starting.")
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in self?.stop() }
         return URL(string: "http://127.0.0.1:\(port)\(Self.path)")!
     }
 
     public func stop() {
-        let (first, server): (Bool, LoopbackHTTPServer?) = lock.withLock {
+        let (first, server): (Bool, LocalHTTPServer?) = lock.withLock {
             defer { stopped = true; self.server = nil }
             return (!stopped, self.server)
         }

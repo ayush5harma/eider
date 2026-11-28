@@ -4,18 +4,26 @@ import Security
 import SwiftASN1
 import X509
 
-/// Whether this device can install from the app's loopback HTTPS server.
+/// Whether this device can install from the app's own HTTPS server.
 public enum LocalInstallStatus: Sendable, Equatable {
-    /// No root certificate yet; the first `rootCertificate()` or `mobileconfig()` creates it.
+    /// No usable root certificate yet; the first `rootCertificate()` or `mobileconfig()` creates
+    /// it. Also reported for a root made before the server moved to the LAN address, whose name
+    /// constraints only permit loopback (`hasOutdatedRoot()` tells the two apart).
     case notSetUp
+    /// No Wi-Fi or other private-network address to serve from (`LocalNetwork`).
+    case needsWiFi
     /// The root exists, but iOS does not trust it: the profile is not installed, or full trust
     /// is not turned on in Settings > General > About > Certificate Trust Settings.
     case needsTrust
-    /// An HTTPS request to the loopback server with the default system trust succeeded.
+    /// The probe could not connect to the app's own server at all (not a certificate failure);
+    /// most likely Local Network access for the app is turned off.
+    case unreachable
+    /// An HTTPS request to the server at the device's LAN address with the default system
+    /// trust succeeded.
     case ready
 }
 
-/// The certificate and key the loopback HTTPS server presents.
+/// The certificate and key the install HTTPS server presents.
 public struct ServerIdentity: @unchecked Sendable {
     public let identity: SecIdentity
     /// DER of the leaf certificate.
@@ -28,12 +36,22 @@ public struct ServerIdentity: @unchecked Sendable {
 ///
 /// Proved on an iPhone 17 Pro with iOS 27.3 (2026-11-28): an itms-services install succeeds when
 /// the manifest and IPA are served over HTTPS whose chain ends at a root the user installed as a
-/// profile and fully trusted, even with that root name-constrained to loopback. The root's
-/// private key stays in the keychain, and the critical name constraints (IP 127.0.0.1/32,
-/// DNS localhost) mean that even a leaked key could not vouch for any other site.
+/// profile and fully trusted, even with that root name-constrained (to the serving LAN /32,
+/// 127.0.0.1/32 and DNS localhost). The root's private key stays in the keychain, and its
+/// critical name constraints permit only 127.0.0.1/32, the private IPv4 ranges and DNS
+/// localhost, so even a leaked key could not vouch for a public site.
 public actor LocalRootAuthority {
     public static let leafCommonName = "Eider local server"
     public static let profileDisplayName = "Eider Local Install"
+
+    /// The root's permitted IP subtrees, in name-constraint form (network then mask). appstored
+    /// refuses a loopback manifest URL ("The manifest URL isn't external", measured 2026-11-28),
+    /// so the server lives at the device's private LAN address and the root must permit those
+    /// ranges. A root without them was made for loopback only and is outdated.
+    static let permittedIPRanges: [[UInt8]] =
+        [LocalNetwork.constraintBytes(network: [127, 0, 0, 1], prefix: 32)]
+        + LocalNetwork.privateRanges.map { LocalNetwork.constraintBytes(network: $0.network, prefix: $0.prefix) }
+    static let permittedDNSDomains = ["localhost"]
 
     /// iOS rejects TLS server certificates valid for more than 825 days from a user-trusted root;
     /// 300 days stays well under that and re-issue is automatic.
@@ -46,6 +64,8 @@ public actor LocalRootAuthority {
     private let store: KeychainStore
     private let namespace: String
     private let now: @Sendable () -> Date
+    /// `permittedIPRanges` except in tests, which make a loopback-only root to see it replaced.
+    private let rootIPRanges: [[UInt8]]
 
     /// - Parameters:
     ///   - namespace: prefix of every keychain tag and label, so tests can keep their own items.
@@ -54,10 +74,12 @@ public actor LocalRootAuthority {
         self.init(namespace: namespace, keychain: keychain, now: { Date() })
     }
 
-    init(namespace: String, keychain: KeychainScope, now: @escaping @Sendable () -> Date) {
+    init(namespace: String, keychain: KeychainScope, now: @escaping @Sendable () -> Date,
+         rootIPRanges: [[UInt8]] = LocalRootAuthority.permittedIPRanges) {
         self.store = KeychainStore(scope: keychain)
         self.namespace = namespace
         self.now = now
+        self.rootIPRanges = rootIPRanges
     }
 
     private var rootKeyTag: String { namespace + ".root.key" }
@@ -98,7 +120,21 @@ public actor LocalRootAuthority {
         let der: Data
     }
 
+    /// Whether the stored root predates the LAN-address server: its name constraints permit
+    /// only loopback, so iOS would refuse a leaf for the LAN address. `hasRoot()` is false for
+    /// it, the next `mobileconfig()` replaces it, and the user installs and trusts the new
+    /// profile.
+    public func hasOutdatedRoot() throws -> Bool {
+        guard let root = try storedRoot() else { return false }
+        return !hasCurrentConstraints(root.certificate)
+    }
+
     private func existingRoot() throws -> Root? {
+        guard let root = try storedRoot(), hasCurrentConstraints(root.certificate) else { return nil }
+        return root
+    }
+
+    private func storedRoot() throws -> Root? {
         guard let key = try store.privateKey(tag: rootKeyTag),
               let secCertificate = try store.certificate(label: rootLabel) else { return nil }
         let der = SecCertificateCopyData(secCertificate) as Data
@@ -106,6 +142,12 @@ public actor LocalRootAuthority {
         // A root whose key was replaced underneath it is unusable; start over.
         guard certificate.publicKey == (try Certificate.PrivateKey(key)).publicKey else { return nil }
         return Root(key: key, certificate: certificate, der: der)
+    }
+
+    private func hasCurrentConstraints(_ certificate: Certificate) -> Bool {
+        guard let constraints = try? certificate.extensions.nameConstraints else { return false }
+        return Set(constraints.permittedIPRanges.map { Array($0.bytes) }) == Set(rootIPRanges)
+            && Set(constraints.permittedDNSDomains) == Set(Self.permittedDNSDomains)
     }
 
     private func ensureRoot() throws -> Root {
@@ -123,8 +165,8 @@ public actor LocalRootAuthority {
             Critical(BasicConstraints.isCertificateAuthority(maxPathLength: 0))
             Critical(KeyUsage(keyCertSign: true, cRLSign: true))
             Critical(NameConstraints(
-                permittedDNSDomains: ["localhost"],
-                permittedIPRanges: [ASN1OctetString(contentBytes: [127, 0, 0, 1, 255, 255, 255, 255])]))
+                permittedDNSDomains: Self.permittedDNSDomains,
+                permittedIPRanges: rootIPRanges.map { ASN1OctetString(contentBytes: $0[...]) }))
             SubjectKeyIdentifier(hash: signingKey.publicKey)
         }
         let certificate = try Certificate(
@@ -145,18 +187,28 @@ public actor LocalRootAuthority {
 
     // MARK: Server certificate
 
-    /// The identity for the loopback HTTPS server: a leaf issued by the root, re-issued when it
-    /// has less than 30 days left or when the root changed.
-    public func serverIdentity() throws -> ServerIdentity {
+    /// The identity for the install HTTPS server: a leaf issued by the root for 127.0.0.1,
+    /// localhost and `addresses`, re-issued when it has less than 30 days left, when the root
+    /// changed, or when one of `addresses` is not in its subjectAltName (the Wi-Fi address
+    /// changed).
+    public func serverIdentity(for addresses: [DeviceAddress] = []) throws -> ServerIdentity {
+        // The root's name constraints would make any other address fail verification on iOS.
+        if let outside = addresses.first(where: { !LocalNetwork.isPrivate($0.bytes) }) {
+            throw KeychainStore.Failure(operation: "server identity for \(outside), outside the private ranges",
+                                        status: errSecParam)
+        }
         let root = try ensureRoot()
         let key = try store.privateKey(tag: leafKeyTag)
             ?? store.createPrivateKey(tag: leafKeyTag, label: Self.leafCommonName + " key")
         let publicKey = try Certificate.PrivateKey(key).publicKey
+        let ipAddresses = [[127, 0, 0, 1]] + addresses.map(\.bytes)
 
         var leaf = try store.certificate(label: leafLabel)
-        if let current = leaf, !isUsable(current, root: root, publicKey: publicKey) { leaf = nil }
+        if let current = leaf, !isUsable(current, root: root, publicKey: publicKey, ipAddresses: ipAddresses) {
+            leaf = nil
+        }
         if leaf == nil {
-            let certificate = try issueLeaf(publicKey: publicKey, root: root)
+            let certificate = try issueLeaf(publicKey: publicKey, root: root, ipAddresses: ipAddresses)
             try store.store(certificate: certificate, label: leafLabel)
             leaf = certificate
         }
@@ -166,17 +218,26 @@ public actor LocalRootAuthority {
         return ServerIdentity(identity: identity, leaf: SecCertificateCopyData(leaf) as Data, root: root.der)
     }
 
-    private func isUsable(_ secCertificate: SecCertificate, root: Root, publicKey: Certificate.PublicKey) -> Bool {
+    private func isUsable(_ secCertificate: SecCertificate, root: Root, publicKey: Certificate.PublicKey,
+                          ipAddresses: [[UInt8]]) -> Bool {
         guard let leaf = try? Certificate(derEncoded: Array(SecCertificateCopyData(secCertificate) as Data)) else {
             return false
         }
+        let alternativeNames = (try? leaf.extensions.subjectAlternativeNames) ?? nil
+        let names: [GeneralName] = alternativeNames.map { Array($0) } ?? []
+        let ipNames = Set(names.compactMap { name -> [UInt8]? in
+            if case .ipAddress(let bytes) = name { return Array(bytes.bytes) }
+            return nil
+        })
         return leaf.publicKey == publicKey
             && leaf.issuer == root.certificate.subject
             && root.certificate.publicKey.isValidSignature(leaf.signature, for: leaf)
             && leaf.notValidAfter.timeIntervalSince(now()) > Self.leafRenewalWindow
+            && ipNames.isSuperset(of: ipAddresses)
     }
 
-    private func issueLeaf(publicKey: Certificate.PublicKey, root: Root) throws -> SecCertificate {
+    private func issueLeaf(publicKey: Certificate.PublicKey, root: Root, ipAddresses: [[UInt8]]) throws
+        -> SecCertificate {
         let issued = now()
         let rootKeyIdentifier = try root.certificate.extensions.subjectKeyIdentifier?.keyIdentifier
         let extensions = try Certificate.Extensions {
@@ -186,10 +247,8 @@ public actor LocalRootAuthority {
             // The names go only in subjectAltName: OpenSSL reads a host-like subject CN as a DNS
             // name and then fails the name constraints ("permitted subtree violation"), measured
             // while proving the method on 2026-11-28.
-            SubjectAlternativeNames([
-                .ipAddress(ASN1OctetString(contentBytes: [127, 0, 0, 1])),
-                .dnsName("localhost"),
-            ])
+            SubjectAlternativeNames(
+                ipAddresses.map { .ipAddress(ASN1OctetString(contentBytes: $0[...])) } + [.dnsName("localhost")])
             SubjectKeyIdentifier(hash: publicKey)
             if let rootKeyIdentifier {
                 AuthorityKeyIdentifier(keyIdentifier: rootKeyIdentifier)
@@ -211,37 +270,83 @@ public actor LocalRootAuthority {
 
     // MARK: Trust status
 
-    /// `.ready` when an HTTPS request to a loopback server presenting our leaf succeeds with
-    /// the default system trust (a URLSession without a delegate): that only happens once the
-    /// user installed the profile and turned on full trust for the root. Does not create a root.
+    /// `.ready` when an HTTPS request to the install server at this device's LAN address,
+    /// presenting our leaf, succeeds with the default system trust (a URLSession without a
+    /// delegate): that only happens once the user installed the profile and turned on full
+    /// trust for the root, and it is the same address and trust appstored uses. Does not create
+    /// a root. Listening on and connecting to the Wi-Fi address is what may raise iOS's Local
+    /// Network prompt, so calling this during setup raises it there rather than mid-install.
     public func status() async -> LocalInstallStatus {
-        await status(probeWith: nil)
+        await status(probeWith: nil, address: LocalNetwork.installAddress())
     }
 
     /// `session` stands in for the default-trust session in tests on the Mac, where the root
     /// cannot be trusted system-wide without prompting the owner.
-    func status(probeWith session: URLSession?) async -> LocalInstallStatus {
+    func status(probeWith session: URLSession?, address: DeviceAddress?) async -> LocalInstallStatus {
         guard (try? hasRoot()) == true else { return .notSetUp }
-        guard let server = try? serverIdentity() else { return .needsTrust }
-        return await Self.probe(server, session: session) ? .ready : .needsTrust
+        guard let address else { return .needsWiFi }
+        guard let server = try? serverIdentity(for: [address]) else { return .needsTrust }
+        switch await Self.probe(server, at: address, session: session) {
+        case .ok: return .ready
+        case .untrusted: return .needsTrust
+        case .unreachable: return .unreachable
+        }
     }
 
-    static func probe(_ server: ServerIdentity, session: URLSession?) async -> Bool {
+    enum ProbeResult: Equatable {
+        case ok
+        /// TLS refused the certificate (or the request got an unexpected answer).
+        case untrusted
+        /// No connection at all: the listener did not start or the connection failed.
+        case unreachable
+    }
+
+    static func probe(_ server: ServerIdentity, at address: DeviceAddress, session: URLSession?) async
+        -> ProbeResult {
         let token = randomHex(bytes: 16)
         let body = Data("eider-ok".utf8)
-        let http = LoopbackHTTPServer(identity: server.identity) { request in
+        let http = LocalHTTPServer(identity: server.identity, binding: .address(address)) { request in
             request.path == "/\(token)/probe" ? .data(body, contentType: "text/plain") : nil
         }
-        guard let port = try? await http.start() else { return false }
+        let port: UInt16
+        do {
+            port = try await http.start()
+        } catch {
+            LocalHTTPServer.log.error("probe listener on \(address, privacy: .public) failed: \(error, privacy: .public)")
+            return .unreachable
+        }
         defer { http.stop() }
 
         let ownSession = session == nil
         let session = session ?? URLSession(configuration: .ephemeral)
         defer { if ownSession { session.finishTasksAndInvalidate() } }
-        let request = URLRequest(url: URL(string: "https://127.0.0.1:\(port)/\(token)/probe")!,
-                                 cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
-        guard let (data, response) = try? await session.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 200 && data == body
+        let url = URL(string: "https://\(address):\(port)/\(token)/probe")!
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        do {
+            let (data, response) = try await session.data(for: request)
+            let ok = (response as? HTTPURLResponse)?.statusCode == 200 && data == body
+            LocalHTTPServer.log.info("probe of \(address, privacy: .public) answered, ok: \(ok, privacy: .public)")
+            return ok ? .ok : .untrusted
+        } catch {
+            let result = classify(error)
+            LocalHTTPServer.log.notice(
+                "probe of \(address, privacy: .public) failed (\(String(describing: result), privacy: .public)): \(error, privacy: .public)")
+            return result
+        }
+    }
+
+    /// Certificate failures mean the root is not trusted yet; anything else means the request
+    /// never reached a TLS handshake.
+    static func classify(_ error: Error) -> ProbeResult {
+        guard let error = error as? URLError else { return .unreachable }
+        switch error.code {
+        case .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateHasBadDate,
+             .serverCertificateNotYetValid, .secureConnectionFailed, .cancelled, .clientCertificateRejected,
+             .clientCertificateRequired:
+            return .untrusted
+        default:
+            return .unreachable
+        }
     }
 
     // MARK: Helpers
@@ -284,7 +389,7 @@ enum MobileConfig {
             "PayloadUUID": profileUUID,
             "PayloadDisplayName": displayName,
             "PayloadDescription": "Lets Eider install apps from its own server on this device. "
-                + "The certificate is limited to 127.0.0.1 and localhost.",
+                + "The certificate is limited to this device and private network addresses.",
             "PayloadOrganization": "Eider",
             "PayloadContent": [[
                 "PayloadType": "com.apple.security.root",

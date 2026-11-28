@@ -47,6 +47,11 @@ final class LocalRootAuthorityTests: XCTestCase {
         XCTAssertTrue(rootText.contains("X509v3 Name Constraints: critical"), rootText)
         XCTAssertTrue(rootText.contains("DNS:localhost"), rootText)
         XCTAssertTrue(rootText.contains("IP:127.0.0.1/255.255.255.255"), rootText)
+        // The private ranges the install server's LAN address comes from.
+        XCTAssertTrue(rootText.contains("IP:10.0.0.0/255.0.0.0"), rootText)
+        XCTAssertTrue(rootText.contains("IP:172.16.0.0/255.240.0.0"), rootText)
+        XCTAssertTrue(rootText.contains("IP:192.168.0.0/255.255.0.0"), rootText)
+        XCTAssertTrue(rootText.contains("IP:100.64.0.0/255.192.0.0"), rootText)
 
         let leafText = try runTool(opensslPath, ["x509", "-in", leafPath, "-noout", "-text"]).output
         XCTAssertTrue(leafText.contains("Subject: CN=Eider local server"), leafText)
@@ -63,9 +68,10 @@ final class LocalRootAuthorityTests: XCTestCase {
         XCTAssertFalse(days.isEmpty)
     }
 
-    func testAppleTrustAcceptsTheLeafForLoopbackOnly() async throws {
+    func testAppleTrustAcceptsTheLeafForLoopbackAndItsLANAddressOnly() async throws {
         let authority = authority()
-        let server = try await authority.serverIdentity()
+        let wifi = DeviceAddress(interface: "en0", bytes: [192, 168, 1, 40])
+        let server = try await authority.serverIdentity(for: [wifi])
         let root = try LocalRootAuthority.secCertificate(server.root)
         let leaf = try LocalRootAuthority.secCertificate(server.leaf)
 
@@ -78,7 +84,72 @@ final class LocalRootAuthorityTests: XCTestCase {
         }
         XCTAssertTrue(evaluate(host: "127.0.0.1"))
         XCTAssertTrue(evaluate(host: "localhost"))
+        XCTAssertTrue(evaluate(host: "192.168.1.40"))
+        XCTAssertFalse(evaluate(host: "192.168.1.41"))
         XCTAssertFalse(evaluate(host: "example.com"))
+
+        // OpenSSL checks the leaf's LAN address against the root's name constraints too.
+        let verify = try runTool(opensslPath, ["verify", "-CAfile", try write(server.root, "lan-root.pem"),
+                                           try write(server.leaf, "lan-leaf.pem")])
+        XCTAssertEqual(verify.status, 0, verify.output)
+        let leafText = try runTool(opensslPath, ["x509", "-in", try write(server.leaf, "lan-leaf.pem"),
+                                                 "-noout", "-text"]).output
+        XCTAssertTrue(leafText.contains("IP Address:192.168.1.40"), leafText)
+        XCTAssertTrue(leafText.contains("Subject: CN=Eider local server"), leafText)
+    }
+
+    func testLeafIsReissuedWhenTheLANAddressChanges() async throws {
+        let home = DeviceAddress(interface: "en0", bytes: [192, 168, 1, 40])
+        let hotspot = DeviceAddress(interface: "en0", bytes: [172, 20, 10, 2])
+        let first = try await authority().serverIdentity(for: [home])
+        let same = try await authority().serverIdentity(for: [home])
+        XCTAssertEqual(first.leaf, same.leaf)
+        // A leaf that also covers loopback does for a loopback-only caller.
+        let loopbackOnly = try await authority().serverIdentity()
+        XCTAssertEqual(first.leaf, loopbackOnly.leaf)
+
+        let moved = try await authority().serverIdentity(for: [hotspot])
+        XCTAssertNotEqual(moved.leaf, first.leaf)
+        XCTAssertEqual(moved.root, first.root)
+    }
+
+    func testRefusesALeafForAPublicAddress() async throws {
+        let public_ = DeviceAddress(interface: "pdp_ip0", bytes: [49, 36, 10, 2])
+        do {
+            _ = try await authority().serverIdentity(for: [public_])
+            XCTFail("issued a leaf the root's name constraints forbid")
+        } catch is KeychainStore.Failure {}
+    }
+
+    /// A root from before the move off loopback permits only 127.0.0.1/32: iOS would refuse a
+    /// leaf for the LAN address, so it counts as not set up and is replaced.
+    func testLoopbackOnlyRootIsOutdatedAndReplaced() async throws {
+        let old = LocalRootAuthority(namespace: "test.eider.install", keychain: keychain.scope, now: { Date() },
+                                     rootIPRanges: [[127, 0, 0, 1, 255, 255, 255, 255]])
+        let oldRoot = try await old.rootCertificate()
+        let oldHasRoot = try await old.hasRoot()
+        XCTAssertTrue(oldHasRoot)
+
+        let current = authority()
+        let hasRoot = try await current.hasRoot()
+        let outdated = try await current.hasOutdatedRoot()
+        XCTAssertFalse(hasRoot)
+        XCTAssertTrue(outdated)
+        let status = await current.status(probeWith: nil, address: DeviceAddress(interface: "en0",
+                                                                                   bytes: [192, 168, 1, 40]))
+        XCTAssertEqual(status, .notSetUp)
+
+        let profile = try await current.mobileconfig()
+        let newRoot = try await current.rootCertificate()
+        XCTAssertNotEqual(newRoot, oldRoot)
+        let stillOutdated = try await current.hasOutdatedRoot()
+        XCTAssertFalse(stillOutdated)
+        let plist = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(from: profile, format: nil) as? [String: Any])
+        XCTAssertEqual(plist["PayloadDisplayName"] as? String, "Eider Local Install")
+        let rootText = try runTool(opensslPath, ["x509", "-in", try write(newRoot, "new-root.pem"), "-noout",
+                                                 "-text"]).output
+        XCTAssertTrue(rootText.contains("IP:192.168.0.0/255.255.0.0"), rootText)
     }
 
     func testIdentityIsReusedThenReissuedNearExpiry() async throws {

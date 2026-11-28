@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 import Security
 
 /// What a route answers with.
@@ -24,13 +25,32 @@ struct HTTPResource {
     }
 }
 
-/// A minimal HTTP/1.1 server on 127.0.0.1 only, one request per connection.
+/// A minimal HTTP/1.1 server for this device only, one request per connection.
 ///
-/// Serves GET and HEAD with single byte ranges; anything a route does not know is a 404. Each
-/// response ends with `Connection: close`, which keeps the parser to one request head and
-/// costs nothing over loopback.
-final class LoopbackHTTPServer: @unchecked Sendable {
+/// Listens on 127.0.0.1, or on one of the device's own addresses (`LocalNetwork` says why the
+/// install server needs that), and answers only connections whose remote address belongs to
+/// the device. Serves GET and HEAD with single byte ranges; anything a route does not know is a
+/// 404. Each response ends with `Connection: close`, which keeps the parser to one request head
+/// and costs nothing on the device itself.
+final class LocalHTTPServer: @unchecked Sendable {
     typealias Router = (HTTPRequest) -> HTTPResource?
+
+    /// Where the listener binds.
+    enum Binding: Sendable, Equatable {
+        /// 127.0.0.1 on the loopback interface.
+        case loopback
+        /// One of this device's own IPv4 addresses.
+        case address(DeviceAddress)
+
+        var host: String {
+            switch self {
+            case .loopback: return "127.0.0.1"
+            case .address(let address): return address.description
+            }
+        }
+    }
+
+    static let log = Logger(subsystem: "io.github.ayush5harma.EideriOS", category: "install")
 
     struct ServerError: Error, CustomStringConvertible {
         let description: String
@@ -49,18 +69,28 @@ final class LoopbackHTTPServer: @unchecked Sendable {
     static let requestTimeout: TimeInterval = 30
 
     private let identity: SecIdentity?
+    private let binding: Binding
     private let router: Router
+    /// The addresses a connection may come from, read again for each connection so an address
+    /// the device gained after the listener started still counts.
+    private let ownAddresses: @Sendable () -> [LocalNetwork.InterfaceAddress]
     private let queue = DispatchQueue(label: "dev.eider.install.http")
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
 
-    /// - Parameter identity: TLS identity; nil serves plain HTTP.
-    init(identity: SecIdentity?, router: @escaping Router) {
+    /// - Parameters:
+    ///   - identity: TLS identity; nil serves plain HTTP.
+    ///   - binding: the address to listen on.
+    init(identity: SecIdentity?, binding: Binding = .loopback,
+         ownAddresses: @escaping @Sendable () -> [LocalNetwork.InterfaceAddress] = { LocalNetwork.interfaceAddresses() },
+         router: @escaping Router) {
         self.identity = identity
+        self.binding = binding
+        self.ownAddresses = ownAddresses
         self.router = router
     }
 
-    /// Starts listening on a free port of 127.0.0.1 and returns that port.
+    /// Starts listening on a free port of the bound address and returns that port.
     func start() async throws -> UInt16 {
         let parameters = try makeParameters()
         let listener = try NWListener(using: parameters)
@@ -127,16 +157,48 @@ final class LoopbackHTTPServer: @unchecked Sendable {
         } else {
             parameters = NWParameters(tls: nil, tcp: tcp)
         }
-        // Bound to the loopback address and interface so nothing off the device can connect.
-        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
-        parameters.requiredInterfaceType = .loopback
-        parameters.acceptLocalOnly = true
+        switch binding {
+        case .loopback:
+            // Bound to the loopback address and interface so nothing off the device can connect.
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+            parameters.requiredInterfaceType = .loopback
+            parameters.acceptLocalOnly = true
+        case .address(let address):
+            // Reachable from the LAN at the socket level; `accept` cancels every connection that
+            // does not come from this device before reading a byte.
+            guard let ipv4 = IPv4Address(Data(address.bytes)) else {
+                throw ServerError(description: "\(address) is not an IPv4 address.")
+            }
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(ipv4), port: .any)
+        }
         return parameters
     }
 
     // MARK: Connections
 
+    /// Whether a connection from `endpoint` comes from this device: a loopback address or one
+    /// of `ownAddresses`.
+    static func isFromThisDevice(_ endpoint: NWEndpoint, ownAddresses: [LocalNetwork.InterfaceAddress]) -> Bool {
+        guard case .hostPort(let host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let address):
+            return LocalNetwork.isOwnAddress(Array(address.rawValue), ownAddresses: ownAddresses)
+        case .ipv6(let address):
+            return LocalNetwork.isOwnAddress(Array(address.rawValue), ownAddresses: ownAddresses)
+        default:
+            return false
+        }
+    }
+
     private func accept(_ connection: NWConnection) {
+        let remote = "\(connection.endpoint)"
+        let local = binding.host
+        guard Self.isFromThisDevice(connection.endpoint, ownAddresses: ownAddresses()) else {
+            Self.log.notice("refused connection from \(remote, privacy: .public) to \(local, privacy: .public)")
+            connection.cancel()
+            return
+        }
+        Self.log.info("accepted connection from \(remote, privacy: .public) to \(local, privacy: .public)")
         let id = ObjectIdentifier(connection)
         connections[id] = connection
         connection.stateUpdateHandler = { [weak self] state in
@@ -211,6 +273,7 @@ final class LoopbackHTTPServer: @unchecked Sendable {
         }
         let length = range.map { $0.upperBound - $0.lowerBound + 1 } ?? 0
         headers.append(("Content-Length", String(length)))
+        Self.logRequest(request, status: status)
         onResponse?(request, status)
 
         let head = Self.head(status: status, reason: status == 206 ? "Partial Content" : "OK", headers: headers)
@@ -250,7 +313,10 @@ final class LoopbackHTTPServer: @unchecked Sendable {
 
     private func sendError(_ status: Int, _ reason: String, on connection: NWConnection, request: HTTPRequest?,
                            extraHeaders: [(String, String)] = []) {
-        if let request { onResponse?(request, status) }
+        if let request {
+            Self.logRequest(request, status: status)
+            onResponse?(request, status)
+        }
         let body = Data("\(status) \(reason)\n".utf8)
         let head = Self.head(status: status, reason: reason, headers: extraHeaders + [
             ("Content-Type", "text/plain; charset=utf-8"),
@@ -260,6 +326,17 @@ final class LoopbackHTTPServer: @unchecked Sendable {
         connection.send(content: payload, completion: .contentProcessed { [weak self] _ in
             self?.finish(connection)
         })
+    }
+
+    /// The last path component (manifest.plist, app.ipa) is public so the device syslog shows
+    /// the flow; the full path carries the install token and stays private.
+    private static func logRequest(_ request: HTTPRequest, status: Int) {
+        let name = request.path.split(separator: "/").last.map(String.init) ?? ""
+        let range = request.headers["range"] ?? "-"
+        log.info("""
+            \(request.method, privacy: .public) .../\(name, privacy: .public) range \(range, privacy: .public) \
+            -> \(status, privacy: .public) (\(request.path, privacy: .private))
+            """)
     }
 
     private static func head(status: Int, reason: String, headers: [(String, String)]) -> Data {

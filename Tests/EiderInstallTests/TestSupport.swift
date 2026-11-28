@@ -90,3 +90,12 @@ final class PinnedRootDelegate: NSObject, URLSessionDelegate {
                           delegateQueue: nil)
     }
 }
+
+/// This Mac's own private-network address, picked the way the iPhone picks its own; the tests
+/// serve from it as the app does from the iPhone's Wi-Fi address.
+func macInstallAddress() throws -> DeviceAddress {
+    guard let address = LocalNetwork.installAddress() else {
+        throw XCTSkip("No private-network IPv4 address on this Mac.")
+    }
+    return address
+}

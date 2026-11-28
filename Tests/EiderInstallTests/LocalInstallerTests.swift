@@ -8,8 +8,11 @@ final class LocalInstallerTests: XCTestCase {
     private var session: URLSession!
     private var ipa: URL!
     private var ipaData: Data!
+    /// The address the installer picks on this Mac, as it picks the iPhone's Wi-Fi address.
+    private var address: DeviceAddress!
 
     override func setUp() async throws {
+        address = try macInstallAddress()
         keychain = try TemporaryKeychain()
         authority = LocalRootAuthority(namespace: "test.eider.installer", keychain: keychain.scope)
         session = PinnedRootDelegate.session(rootDER: try await authority.rootCertificate())
@@ -81,9 +84,9 @@ final class LocalInstallerTests: XCTestCase {
 
         XCTAssertEqual(box.data, ipaData)
         guard case .serving(let manifest) = progress.first else { return XCTFail("\(progress)") }
-        XCTAssertEqual(manifest.host, "127.0.0.1")
+        XCTAssertEqual(manifest.host, address.description)
         guard case .opened(let link) = progress.dropFirst().first else { return XCTFail("\(progress)") }
-        XCTAssertTrue(link.absoluteString.hasPrefix("itms-services://?action=download-manifest&url=https%3A%2F%2F127.0.0.1%3A"))
+        XCTAssertTrue(link.absoluteString.hasPrefix("itms-services://?action=download-manifest&url=https%3A%2F%2F\(address!)%3A"))
         XCTAssertTrue(progress.contains(.manifestFetched))
         XCTAssertTrue(progress.contains(.downloading(sent: Int64(ipaData.count), total: Int64(ipaData.count))))
         XCTAssertEqual(progress.last, .handedToIOS)
@@ -94,7 +97,7 @@ final class LocalInstallerTests: XCTestCase {
         let ended = await log.ended
         XCTAssertEqual(begun, 1)
         XCTAssertEqual(ended, 1)
-        XCTAssertEqual(tcpConnect(host: "127.0.0.1", port: manifest.port!), ECONNREFUSED)
+        XCTAssertEqual(tcpConnect(host: address.description, port: manifest.port!), ECONNREFUSED)
     }
 
     func testInstallThrowsWhenTheLinkCannotBeOpened() async throws {
@@ -108,6 +111,26 @@ final class LocalInstallerTests: XCTestCase {
         }
         let ended = await log.ended
         XCTAssertEqual(ended, 1)
+    }
+
+    /// Without Wi-Fi there is no address appstored would take: say so instead of serving a
+    /// loopback link it refuses as not external.
+    func testInstallWithoutWiFiAsksForWiFi() async throws {
+        let log = ActivityLog()
+        let installer = LocalInstaller(authority: authority, opener: { _ in
+            XCTFail("opened a link without an address to serve from")
+            return true
+        }, background: activity(log), installAddress: { nil })
+        do {
+            _ = try await installer.install(ipa: ipa, bundleID: "a", version: "1", title: "A")
+            XCTFail("expected needsWiFi")
+        } catch let error as LocalInstaller.Error {
+            XCTAssertEqual(error, .needsWiFi)
+            XCTAssertEqual(error.description,
+                           "Connect to Wi-Fi to install: iOS will not take an install link served from this iPhone's internal address.")
+        }
+        let begun = await log.begun
+        XCTAssertEqual(begun, 0)
     }
 
     func testInstallTimesOutWhenIOSNeverFetches() async throws {
